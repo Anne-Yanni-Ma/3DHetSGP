@@ -1,0 +1,4 @@
+./data/3DSSG_data_examples/data_0
+./data/3DSSG_data_examples/data_1
+./data/3DSSG_data_examples/data_2
+./data/3DSSG_data_examples/data_3
