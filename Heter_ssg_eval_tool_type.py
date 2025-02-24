@@ -14,8 +14,9 @@ comparative_label_np = np.array([8,9,10,11,12,13]) # 6个
 comparative_map = [1,2,3,4,5,6]
 cp_label = [2,3,4,5,6,7,8,9,10,11,12,13]
 cp_label_np = np.array([2,3,4,5,6,7,8,9,10,11,12,13])
-
-
+head_label =[6,2,3,15,14,4,5]
+body_label = [13,16,10,11,17,8,9,1]
+tail_label = [23,18,12,19,21,25,22,24,20,26]
 
 def setup_seed(seed):
     torch.manual_seed(seed)
@@ -39,149 +40,6 @@ with open('./data/relationships-know3d-ori.txt', 'r') as f:
     for i in range(len(relationships)):
         relationships[i] = relationships[i].strip()
 f.close()
-
-
-
-class Object_Accuracy():
-    def __init__(self, len_dataset, show_acc_category=False, need_softmax=True):
-        self.len_dataset = len_dataset
-        self.show_acc_category = show_acc_category
-        self.need_softmax = need_softmax
-
-        self.acc_overall = 0.0
-        self.acc_mean = 0.0
-        self.acc_category = np.zeros(160)
-
-        self.count_all = 0.0
-        self.count_category = np.zeros(160)
-
-    def calculate_accuray(self, obj_output, gt_obj):
-        gt_obj = gt_obj.cpu().numpy()
-        if self.need_softmax:
-            obj_scores = F.softmax(obj_output, dim=1).cpu().numpy()
-        else:
-            obj_scores = obj_output.cpu().numpy()
-        obj_output = obj_scores.argmax(1)
-        correct = np.sum(obj_output == gt_obj)
-
-        self.count_all += gt_obj.shape[0]
-        self.acc_overall += correct
-        for i in range(obj_output.shape[0]):
-            if obj_output[i] == gt_obj[i]:
-                self.acc_category[int(obj_output[i])] += 1
-            self.count_category[int(gt_obj[i])] += 1
-
-    def final_update(self):
-        self.acc_overall /= self.count_all
-        for i in range(160):
-            if self.count_category[i] == 0:
-                self.count_category[i] = 99999
-        print("acc_category: ",self.acc_category)
-        self.acc_category /= self.count_category
-        self.acc_mean = self.acc_category.sum() / 160
-
-    def print_string(self):
-        if self.show_acc_category:
-            res = ''
-            res += ('Object Acc_o: %f; ' % self.acc_overall) + ('Object Acc_m: %f; ' % self.acc_mean)
-            res += '\n'
-            for i in range(self.acc_category.shape[0]):
-                res += ('%s: ' % classes[i]) + ('%f\n' % self.acc_category[i])
-            return res
-        else:
-            return ('Object Acc_o: %f; ' % self.acc_overall) + ('Object Acc_m: %f; ' % self.acc_mean)
-
-    def reset(self):
-        self.__init__()
-
-class Object_Recall():
-    def __init__(self, len_dataset, need_softmax=True):
-        self.recall = {1: 0, 5: 0, 10: 0}
-        self.topk_obj = []
-        self.need_softmax = need_softmax
-
-    def calculate_recall(self, obj_output, obj_gt):
-        if self.need_softmax:
-            obj_output = F.softmax(obj_output, dim=1)
-        topk = torch.topk(obj_output, k=10, dim=1).indices
-        for i in range(obj_gt.shape[0]):
-            flag = False
-            for j in range(10):
-                if obj_gt[i] == topk[i, j]:
-                    self.topk_obj.append(j+1)
-                    flag = True
-                    break
-            if flag is False:
-                self.topk_obj.append(10+1)
-
-    def final_update(self):
-        ntopk_obj = np.asarray(self.topk_obj)
-        len_ntop_obj = len(ntopk_obj)
-        self.recall[1] = (ntopk_obj <= 1).sum() / len_ntop_obj
-        self.recall[5] = (ntopk_obj <= 5).sum() / len_ntop_obj
-        self.recall[10] = (ntopk_obj <= 10).sum() / len_ntop_obj
-
-    def print_string(self):
-        return ('Object R@1: %f; ' % self.recall[1]) + ('Object R@5: %f; ' % self.recall[5]) + ('Object R@10: %f; ' % self.recall[10])
-
-    def reset(self):
-        self.__init__()
-
-class Total_Predicate_Accuracy():
-    def __init__(self, len_dataset, need_softmax=True):
-        self.len_dataset = len_dataset
-        self.acc= 0
-        self.macc= 0
-        self.sum_acc=0
-    def toTriple(self, insnum, pred_output, threshold=0.5):
-        pred_rel =[]
-        edge_index = 0
-        for i in range(insnum):
-            for j in range(insnum):
-                if i==j: continue
-                pred_scores = pred_output[edge_index]
-                valid_classes = np.where(pred_scores.cpu().numpy() >= threshold)[0]
-                if len(valid_classes) > 0:
-                    for pred_class in valid_classes:
-                        pred_rel.append([i, j, pred_class])
-                else:
-                    pass
-                edge_index += 1
-        return pred_rel
-
-
-    def calculate_accuracy(self, insnum, heter_edge_output, gt_rel):
-        pred_output_s, pred_output_p, pred_output_c = heter_edge_output
-        pred_output = torch.zeros((insnum * insnum - insnum, 27)).cuda()
-
-        pred_output[:, 1] = pred_output_s[:, 1]
-        pred_output[:, 14:27] = pred_output_s[:, 2:15]
-        pred_output[:, 2:8] = pred_output_p[:, 1:7]
-        pred_output[:, 8:14] = pred_output_c[:, 1:7]
-
-        pred_rel = self.toTriple(insnum, pred_output,threshold=0.5)
-        pred_rel_set = set(pred_rel[0])
-        gt_rel_list =gt_rel.tolist()
-        gt_rel_set = set(gt_rel_list)
-
-        # 计算 True Positive (TP): 预测正确的三元组
-        tp = len(gt_rel_set & pred_rel_set)
-        # 计算 False Positive (FP): 预测为正但实际不存在的关系
-        fp = len(pred_rel_set - gt_rel_set)
-        # 计算 False Negative (FN): 真实存在但未预测出的关系
-        fn = len(gt_rel_set - pred_rel_set)
-        # 计算 Accuracy
-        self.acc = tp / (tp + fp + fn) if (tp + fp + fn) > 0 else 0
-        print(tp,fp,fn)
-        print(self.acc)
-        self.sum_acc+=self.acc
-        #return accuracy
-
-    def final_update(self):
-        self.macc=self.sum_acc / self.len_dataset
-    def print_string(self):
-        res = 'Accuracy of pred_rel: %f;' %self.macc +'\n'
-        return res
 
 
 class Heter_Predicate_Accuracy():
@@ -235,20 +93,16 @@ class Heter_Predicate_Accuracy():
         num_gt_s=0
         num_gt_p=0
         num_gt_c=0
-        exist_pair_p=[]
 
         onehot = torch.zeros((insnum * insnum - insnum, 27)).cuda()
         for i in range(gt_rel.shape[0]):
             idx_i = gt_rel[i, 0]  # obj
             idx_j = gt_rel[i, 1]  # suj
             predgt =int(gt_rel[i, 2])
-
             if predgt in support_label:
                 num_gt_s +=1
             if predgt in proximity_label:
-                if [idx_i,idx_j] not in exist_pair_p:
-                    num_gt_p +=1
-                    #exist_pair_p.append([idx_i, idx_j])
+                num_gt_p +=1
             if predgt in comparative_label:
                 num_gt_c +=1
             if idx_i < idx_j:
@@ -256,7 +110,6 @@ class Heter_Predicate_Accuracy():
             elif idx_i > idx_j:
                 onehot[int(idx_i * (insnum - 1) + idx_j), int(gt_rel[i, 2])] = 1
             self.count_category[int(gt_rel[i, 2])] += 1
-
         for i in range(insnum * insnum - insnum):
             if torch.sum(onehot[i, :]) == 0:
                 onehot[i, 0] = 1
@@ -396,48 +249,6 @@ class Heter_Predicate_Recall():
                 self.topk_pred.append(5+1)
         return self.topk_pred
 
-    def calculate_Heter_recall_w(self, insnum, heter_edge_output, gt_rel):
-        # 计算multi_pred_outputs的recall
-
-        pred_output_s, pred_output_p, pred_output_c =  heter_edge_output
-        # (Ne,2)     (Ne,15) 1,14~26   (Ne,7) 2~7    (Ne,7) 8~13
-        pred_output = torch.zeros((insnum * insnum - insnum, 27)).cuda()
-        link_w, support_w, p_w, comp_w = types_w
-        '''pred_output_s = F.softmax(pred_output_s, dim=1)
-        pred_output_p = F.softmax(pred_output_p, dim=1)
-        pred_output_c = F.softmax(pred_output_c, dim=1)
-        '''
-        pred_output_s = support_w.view(support_w.shape[0], 1) * pred_output_s
-        pred_output_p = p_w.view(p_w.shape[0], 1) * pred_output_p
-        pred_output_c = comp_w.view(comp_w.shape[0], 1) * pred_output_c
-        pred_output[:,1] = pred_output_s[:,1]
-        pred_output[:, 14:27] = pred_output_s[:,2:15]
-        pred_output[:,2:8] = pred_output_p[:,1:7]
-        pred_output[:,8:14] = pred_output_c[:,1:7]
-        #pred_output = F.softmax(pred_output, dim=1)
-
-        if self.need_softmax:
-            pred_output = F.softmax(pred_output, dim=1)
-        topk = torch.topk(pred_output, k=5, dim=1).indices
-        for i in range(gt_rel.shape[0]):
-            idx_i = int(gt_rel[i, 0])
-            idx_j = int(gt_rel[i, 1])
-            idx = 0
-            if idx_i < idx_j:
-                idx = idx_i * (insnum-1) + idx_j - 1
-            elif idx_i > idx_j:
-                idx = idx_i * (insnum-1) + idx_j
-            flag = False
-            self.recall_count[int(gt_rel[i, 2])-1] += 1
-            for j in range(5):
-                if gt_rel[i, 2] == topk[idx, j]:
-                    self.recall_category[int(gt_rel[i, 2])-1] += 1
-                    self.topk_pred.append(j+1)
-                    flag = True
-                    break
-            if flag is False:
-                self.topk_pred.append(5+1)
-        return self.topk_pred
 
 
     def calculate_Single_recall(self, insnum, heter_edge_output,gt_rel):
@@ -538,7 +349,7 @@ class Heter_Predicate_Recall():
         self.recall[3] = (ntopk_pred <= 3).sum() / len_ntop_pred
         self.recall[5] = (ntopk_pred <= 5).sum() / len_ntop_pred
         self.recall_category = self.recall_category / self.recall_count
-
+        print("Predicate recall R@5:", self.recall_category)
         ntopk_pred_s = np.asarray(self.topk_pred_s)
         len_ntop_pred_s = len(ntopk_pred_s)
         self.recall_s[1] = (ntopk_pred_s <= 1).sum() / len_ntop_pred_s
@@ -579,7 +390,7 @@ class Heter_Relation_Recall():
         self.m_recall_cat = np.zeros((4, 26))
         self.len_dataset = len_dataset
         self.need_softmax = need_softmax
-        self.rel_acc50=[]
+        self.ngc_top20 = []
 
     def calculate_Hierarchi_Heter_recall(self, obj_output, heter_edge_output, gt_obj, gt_rel,):
         obj_num = gt_obj.shape[0]
@@ -656,7 +467,7 @@ class Heter_Relation_Recall():
             self.recall[k] += rec_i
             if k == 50:
                 value = rec_i
-                print(acc_rel)
+                #print(acc_rel)
 
             if k == 20:
                 for i in range(match_s.shape[0]):
@@ -709,6 +520,7 @@ class Heter_Relation_Recall():
 
         np_pred = pred_output_single.cpu().numpy()
 
+
         if self.need_softmax:
             obj_scores = F.softmax(obj_output, dim=1).cpu().numpy()
             pred_scores = F.softmax(pred_output, dim=1).cpu().numpy()
@@ -718,17 +530,15 @@ class Heter_Relation_Recall():
             pred_scores_single = pred_output_single.cpu().numpy()
         obj_inds = np.array([[i, j] for i in range(obj_num) for j in range(obj_num) if i != j])
         obj_score = obj_scores.max(1)
-        #pred_scores[:,1:] = refine_transi(obj_num, pred_scores[:, 1:], transitivity_weight=0.5)
         pred_score = pred_scores[:, 1:].max(1)
         pred_score_single = pred_scores_single[:, 1:].max(1)
 
         obj_output = obj_scores.argmax(1)
         pred_output = pred_scores[:, 1:].argmax(1) + 1
         triplet, triplet_score = _triplet(obj_inds, obj_output, pred_output, obj_score, pred_score)
-
-        '''obj_score = np.ones(obj_num)
+        obj_score = np.ones(obj_num)
         obj_output = gt_obj.cpu().numpy()
-        triplet, triplet_score = _triplet(obj_inds, obj_output, pred_output, obj_score, pred_score)'''
+        triplet, triplet_score = _triplet(obj_inds, obj_output, pred_output, obj_score, pred_score)
 
         sorted_triplet = triplet[np.argsort(-triplet_score)]
         # prepare gt relation triplet
@@ -741,15 +551,9 @@ class Heter_Relation_Recall():
         gt_pred = gt_rel[:, 2].cpu().numpy()
         gt_triplet = _triplet(gt_obj_inds, gt_obj, gt_pred, None, None)
 
-        pred_tri_20 = sorted_triplet[:20]
-        ii =0
-        '''for rel in pred_tri_20:
-            ii += 1
-            s,p,o = rel
-            print(ii,':',classes[s],'--', relationships[p], '--', classes[o])'''
         # calculate matches
         pred_to_gt = _compute_pred_matches(gt_triplet, sorted_triplet)
-        #print(pred_to_gt[:20])
+
         for i in range(gt_triplet.shape[0]):
             self.m_recall_cat[0, gt_triplet[i, 1]-1] += 1
         # calculate recalls
@@ -766,7 +570,6 @@ class Heter_Relation_Recall():
             if k == 50:
                 value = rec_i
                 #print(rec_i)
-                #self.rel_acc50.append(value)
 
             if k == 20:
                 for i in range(match.shape[0]):
@@ -802,7 +605,7 @@ class Heter_Relation_Recall():
             pred_scores = F.softmax(pred_output, dim=1).cpu().numpy()
         else:
             pred_scores = pred_output.cpu().numpy()
-        #pred_scores[:,1:] = refine_transi(obj_num, pred_scores[:, 1:], transitivity_weight=0.5)
+
         obj_scores_per_rel = obj_score[obj_inds].prod(1)
         ngc_overall_scores = obj_scores_per_rel[:, None] * pred_scores[:, 1:]
         ngc_overall_scores_1d = ngc_overall_scores.reshape(1, -1)
@@ -821,15 +624,26 @@ class Heter_Relation_Recall():
         gt_obj = gt_obj.cpu().numpy()
         gt_pred = gt_rel[:, 2].cpu().numpy()
         gt_triplet = _triplet(gt_obj_inds, gt_obj, gt_pred, None, None)
-
+        #print("gt_obj", gt_obj )
+        #print("gt_rel:", gt_rel)
+        gtt_id =0
+        for gtt in gt_triplet:
+            gtt_id +=1
+            subj, pred, obj = gtt
+            #print(gtt_id, " gt_triplet: ",  classes[subj], "+", relationships[pred],"->", classes[obj])
         # calculate matches
         pred_to_gt = _compute_pred_matches(gt_triplet, triplet)
-
+        #print("NGC pred scores:",ngc_pred_scores[:20])
         # calculate recalls
         for k in self.ngc_recall:
             # the following code are copied from Neural-MOTIFS
             match = reduce(np.union1d, pred_to_gt[:k])
             rec_i = float(len(match)) / float(gt_rel.shape[0])
+            if k==20:
+                self.ngc_top20.append(round(rec_i*100,2))
+                #print(rec_i)
+                #print("match_k20: ", match)
+
             self.ngc_recall[k] += rec_i
         return self.ngc_recall
 
@@ -843,13 +657,17 @@ class Heter_Relation_Recall():
                         self.m_recall_cat[1, i] /= self.m_recall_cat[0, i]
                     if k == 50:
                         self.m_recall_cat[2, i] /= self.m_recall_cat[0, i]
+                        #print("Predicate_R3:", self.m_recall_cat[1, i])
                     if k == 100:
                         self.m_recall_cat[3, i] /= self.m_recall_cat[0, i]
             if k == 20:
+                #print("Predicate_R20:", self.m_recall_cat[1])
                 self.m_recall[k] = self.m_recall_cat[1].mean()
             if k == 50:
+                #print("Predicate_R50:", self.m_recall_cat[2])
                 self.m_recall[k] = self.m_recall_cat[2].mean()
             if k == 100:
+                #print("Predicate_R100:", self.m_recall_cat[3])
                 self.m_recall[k] = self.m_recall_cat[3].mean()
 
     def print_string(self):
@@ -862,367 +680,51 @@ class Heter_Relation_Recall():
     def reset(self):
         self.__init__()
 
-
-class Predicate_Accuracy():
-    def __init__(self, len_dataset, need_softmax=True):
-        self.len_dataset = len_dataset
-        self.binary_acc = 0
-        self.binary_recall = 0
-        self.binary_acc_1 =0
-        self.acc = 0
-        self.acc_1 = 0
-        self.acc_type_1 = 0
-
-        self.acc_mean = 0.0
-        self.acc_mean_1 = 0.0
-        self.acc_mean_type_1 = 0.0
-        self.acc_category = np.zeros(27)
-        self.acc_category_1 = np.zeros(27)
-        self.acc_category_type_1 = np.zeros(3)
-        self.count_category = np.zeros(27)
-        self.count_category_1 = np.zeros(27)
-        self.count_category_type_1 = np.zeros(3)
-        self.type_acc_1 = [0,0]
-        self.need_softmax = need_softmax
-
-    def calculate_accuracy_binary(self, insnum, pred_output, gt_rel):
-        if self.need_softmax:
-            pred_output = F.softmax(pred_output, dim=1)
-        pred_label = torch.argmax(pred_output, dim=1)  # for example tensor([ 0,  0,  0, 16, 20, 16,  0,  0,  0,  0,  0,  0], device='cuda:0')
-        gt = torch.zeros(pred_label.shape[0])
-        correct_count = 0
-        correct_count_1 = 0
-
-        for i in range(gt_rel.shape[0]):
-            idx_i = int(gt_rel[i, 0])
-            idx_j = int(gt_rel[i, 1])
-            idx = 0
-            if idx_i < idx_j:
-                idx = idx_i * (insnum-1) + idx_j - 1
-            elif idx_i > idx_j:
-                idx = idx_i * (insnum-1) + idx_j
-            gt[idx] = 1
-        for i in range(gt.shape[0]):
-            if pred_label[i] == 0 and gt[i] == 0:
-                correct_count += 1
-            elif pred_label[i] != 0 and gt[i] == 1:
-                correct_count += 1
-        self.binary_acc = self.binary_acc + (correct_count / pred_label.shape[0])
-        #print("binary_acc_all: ", self.binary_acc)
-
-        pairs = gt_rel[:, :2]
-        real_edge = torch.unique(pairs, dim=0)
-        edge_num_1 = real_edge.shape[0]
-        correct_edge_id = []
-
-        for i in range(gt.shape[0]):
-            if pred_label[i] != 0 and gt[i] == 1 and i not in correct_edge_id:
-                correct_count_1 += 1
-                correct_edge_id.append(i)
-        self.binary_acc_1 = self.binary_acc_1 + (correct_count_1 / edge_num_1)
-        #print("binary_acc_1: ", self.binary_acc_1)
-
-    def calculate_recall_binary(self, insnum, pred_output, gt_rel):
-        if self.need_softmax:
-            pred_output = F.softmax(pred_output, dim=1)
-        pred_label = torch.argmax(pred_output, dim=1)
-        gt = torch.zeros(pred_label.shape[0])
-        related_count = 0
-        for i in range(gt_rel.shape[0]):
-            idx_i = int(gt_rel[i, 0])
-            idx_j = int(gt_rel[i, 1])
-            idx = 0
-            if idx_i < idx_j:
-                idx = idx_i * (insnum-1) + idx_j - 1
-            elif idx_i > idx_j:
-                idx = idx_i * (insnum-1) + idx_j
-            gt[idx] = 1
-        related_total = (gt == 1).sum().float().data
-        if related_total == 0:
-            self.binary_recall = self.binary_recall + 0
-        else:
-            for i in range(gt.shape[0]):
-                if pred_label[i] != 0 and gt[i] == 1:
-                    related_count += 1
-            self.binary_recall = self.binary_recall + (related_count / related_total)
-
-    def calculate_accuracy(self, insnum, pred_output, gt_rel):
-        pred_output = F.softmax(pred_output, dim=1)
-        pred_label = torch.argmax(pred_output, dim=1)
-        onehot = torch.zeros((insnum * insnum - insnum, 27)).cuda()
-        for i in range(gt_rel.shape[0]):
-            idx_i = gt_rel[i, 0]  #obj
-            idx_j = gt_rel[i, 1]  #suj
-            if idx_i < idx_j:
-                onehot[int(idx_i * (insnum-1) + idx_j - 1), int(gt_rel[i, 2])] = 1
-            elif idx_i > idx_j:
-                onehot[int(idx_i * (insnum-1) + idx_j), int(gt_rel[i, 2])] = 1
-            self.count_category[int(gt_rel[i, 2])] += 1
-        for i in range(insnum * insnum - insnum):
-            if torch.sum(onehot[i, :]) == 0:
-                onehot[i, 0] = 1
-                self.count_category[0] += 1  # 无边的关系加到 none类别  注意3dssg的none类别不在第0位
-        count = 0
-        for i in range(pred_label.shape[0]):
-            idx = pred_label[i]
-            if onehot[i, idx] == 1:
-                count += 1
-                self.acc_category[idx] += 1
-        self.acc = self.acc + (count / pred_label.shape[0])
-
-    def calculate_accuracy_1(self, insnum, pred_output, gt_rel):
-        pred_output = F.softmax(pred_output, dim=1)
-        pred_label = torch.argmax(pred_output, dim=1)
-        onehot = torch.zeros((insnum * insnum - insnum, 27)).cuda()
-        for i in range(gt_rel.shape[0]):
-            idx_i = gt_rel[i, 0]  #obj
-            idx_j = gt_rel[i, 1]  #suj
-            if idx_i < idx_j:
-                onehot[int(idx_i * (insnum-1) + idx_j - 1), int(gt_rel[i, 2])] = 1
-            elif idx_i > idx_j:
-                onehot[int(idx_i * (insnum-1) + idx_j), int(gt_rel[i, 2])] = 1
-            self.count_category_1[int(gt_rel[i, 2])] += 1
-
-        pairs = gt_rel[:, :2]
-        real_edge = torch.unique(pairs, dim=0)
-        edge_num_1 = real_edge.shape[0]
-
-        count = 0
-        for i in range(pred_label.shape[0]):
-            idx = pred_label[i]
-            if idx!=0 and onehot[i, idx] == 1:
-                count += 1
-                self.acc_category_1[idx] += 1
-        self.acc_1 = self.acc_1 + (count / gt_rel.shape[0])
-
-    def calculate_accuracy_type_1(self, insnum, pred_output, gt_rel):
-        pred_output = F.softmax(pred_output, dim=1)
-        pred_label = torch.argmax(pred_output, dim=1)
-        gt = torch.zeros(pred_label.shape[0])
-
-        support_count_1 = 0
-        cp_count_1 = 0
-        correct_count_1 =0
-        pairs = gt_rel[:, :2]
-        real_edge_id = []
-        for i in range(gt_rel.shape[0]):
-            idx_i = int(gt_rel[i, 0])
-            idx_j = int(gt_rel[i, 1])
-            predgt = int(gt_rel[i, 2])
-            if (predgt in support_label):
-                type_id = 1
-            elif (predgt in cp_label):
-                type_id = 2
-            else:
-                type_id = 0 # impossible
-            idx = 0
-            if idx_i < idx_j:
-                idx = idx_i * (insnum - 1) + idx_j - 1
-            elif idx_i > idx_j:
-                idx = idx_i * (insnum - 1) + idx_j
-            gt[idx] = type_id
-            if idx not in real_edge_id:
-                real_edge_id.append(idx)
-            self.count_category_type_1[type_id] += 1
-
-        for i in range(gt.shape[0]):
-            idx = pred_label[i]
-            if idx in support_label:
-                type_idx = 1
-            elif idx in cp_label:
-                type_idx = 2
-            else:
-                type_idx = 0
-
-            if type_idx ==1 and gt[i] == 1:
-                support_count_1 += 1
-                self.acc_category_type_1[type_idx] += 1
-            elif type_idx ==2 and gt[i]==2:
-                cp_count_1 += 1
-                self.acc_category_type_1[type_idx] += 1
-            correct_count_1 = support_count_1 + cp_count_1
-        self.acc_type_1 = self.acc_type_1 + (correct_count_1 / gt_rel.shape[0])
-
-        '''onehot = torch.zeros((insnum * insnum - insnum, 3)).cuda()
-        for i in range(gt_rel.shape[0]):
-            idx_i = gt_rel[i, 0]  #obj
-            idx_j = gt_rel[i, 1]  #suj
-            predgt = gt_rel[i, 2]
-            if (predgt in support_label):
-                type_id = 1
-            elif (predgt in cp_label):
-                type_id = 2
-            else:
-                type_id = 0
-            if idx_i < idx_j:
-                onehot[int(idx_i * (insnum-1) + idx_j - 1), type_id] = 1
-            elif idx_i > idx_j:
-                onehot[int(idx_i * (insnum-1) + idx_j), type_id] = 1
-            self.count_category_type_1[type_id] += 1
-
-        pairs = gt_rel[:, :2]
-        real_edge = torch.unique(pairs, dim=0)
-        edge_num_1 = real_edge.shape[0]
-
-        count = 0
-        for i in range(pred_label.shape[0]):
-            idx = pred_label[i]
-            if idx in support_label:
-                type_idx = 1
-            elif idx in cp_label:
-                type_idx = 2
-            else:
-                type_idx = 0
-            # 27 转换为3大类type(none, support, com&pro)
-            if type_idx!=0 and onehot[i, type_idx] == 1:
-                count += 1
-                self.acc_category_type_1[type_idx] += 1
-        self.acc_type_1 = self.acc_type_1 + (count / gt_rel.shape[0])'''
-
-    def final_update(self):
-        self.binary_acc = self.binary_acc / self.len_dataset
-        self.binary_acc_1 = self.binary_acc_1 / self.len_dataset
-        self.binary_recall = self.binary_recall / self.len_dataset
-        self.acc = self.acc / self.len_dataset
-        self.acc_1 = self.acc_1 / self.len_dataset
-        self.acc_type_1 = self.acc_type_1 / self.len_dataset
-
-        for i in range(27):
-            if self.count_category[i] == 0:
-                self.count_category[i] = 1
-        for i in range(27):
-            if self.count_category_1[i] == 0:
-                self.count_category_1[i] = 1
-        for i in range(3):
-            if self.count_category_type_1[i] == 0:
-                self.count_category_type_1[i] = 1
-        self.acc_category = self.acc_category / self.count_category
-        self.acc_mean = self.acc_category.mean()
-        self.acc_category_1 = self.acc_category_1 / self.count_category_1
-        self.acc_mean_1 = self.acc_category_1[1:].mean()
-        self.acc_category_type_1 = self.acc_category_type_1 / self.count_category_type_1
-        self.acc_mean_type_1 = self.acc_category_type_1[1:].mean()
-        self.type_acc_1 = self.acc_category_type_1[1:]
-
-    def print_string(self):
-        res = 'Predicate Binary Acc all: %f; ' % self.binary_acc + 'Relation Binary Recall: %f; ' % self.binary_recall + 'Relation Acc: %f; ' % self.acc + '\n'
-        res += f'Predicate mean acc: {self.acc_mean}'
-        res += 'Predicate Binary Acc 1: %f; ' % self.binary_acc_1
-        res += ' 26 Relation Acc 1(only edge): %f; ' % self.acc_1
-        res += f' 26 Predicate  mean acc 1(only edge): {self.acc_mean_1}'+ '\n'
-        res += ' 2 type Relation Acc 1(only edge): %f; ' % self.acc_type_1 + '\n'
-        res += f' 2 type Predicate  mean acc 1(only edge): {self.acc_mean_type_1}'+ '\n'
-        res += f' 2 type Predicate acc 1(only edge): {self.type_acc_1}' + '\n'
-
-        return res
-
-    def reset(self):
-        self.__init__()
-
-class Predicate_Recall():
-    def __init__(self, len_dataset, need_softmax=True):
-        self.recall = {1: 0, 3: 0, 5: 0}
-        self.topk_pred = []
-        self.need_softmax = need_softmax
-        self.recall_category = np.zeros(26)
-        self.recall_count = np.zeros(26) + 1e-6
-
-    def calculate_recall(self, insnum, pred_output, gt_rel):
-        if self.need_softmax:
-            pred_output = F.softmax(pred_output, dim=1)
-        topk = torch.topk(pred_output, k=5, dim=1).indices
-        for i in range(gt_rel.shape[0]):
-            idx_i = int(gt_rel[i, 0])
-            idx_j = int(gt_rel[i, 1])
-            idx = 0
-            if idx_i < idx_j:
-                idx = idx_i * (insnum-1) + idx_j - 1
-            elif idx_i > idx_j:
-                idx = idx_i * (insnum-1) + idx_j
-            flag = False
-            self.recall_count[int(gt_rel[i, 2])-1] += 1
-            for j in range(5):
-                if gt_rel[i, 2] == topk[idx, j]:
-                    self.recall_category[int(gt_rel[i, 2])-1] += 1
-                    self.topk_pred.append(j+1)
-                    flag = True
-                    break
-            if flag is False:
-                self.topk_pred.append(5+1)
-        return self.topk_pred
-
-    def final_update(self):
-        ntopk_pred = np.asarray(self.topk_pred)
-        len_ntop_pred = len(ntopk_pred)
-        self.recall[1] = (ntopk_pred <= 1).sum() / len_ntop_pred
-        self.recall[3] = (ntopk_pred <= 3).sum() / len_ntop_pred
-        self.recall[5] = (ntopk_pred <= 5).sum() / len_ntop_pred
-        self.recall_category = self.recall_category / self.recall_count
-
-    def print_string(self):
-        return ('Predicate R@1: %f; ' % self.recall[1]) + ('Predicate R@3: %f; ' % self.recall[3]) + ('Predicate R@5: %f; ' % self.recall[5])
-
-    def reset(self):
-        self.__init__()
-
-class Predicate_Recall_Onehot():
-    def __init__(self, len_dataset, need_softmax=True):
-        self.recall = {1: 0, 3: 0, 5: 0}
-        self.topk_pred = []
-        self.need_softmax = need_softmax
-        self.recall_category = np.zeros(26)
-        self.recall_count = np.zeros(26) + 1e-6
-
-    def calculate_recall(self, insnum, pred_output, gt_rel):
-        if self.need_softmax:
-            pred_output = F.softmax(pred_output, dim=1)
-        topk = torch.topk(pred_output, k=5, dim=1).indices
-        for i in range(gt_rel.shape[0]):
-            idx_i = int(gt_rel[i, 0])
-            idx_j = int(gt_rel[i, 1])
-            idx = 0
-            if idx_i < idx_j:
-                idx = idx_i * (insnum-1) + idx_j - 1
-            elif idx_i > idx_j:
-                idx = idx_i * (insnum-1) + idx_j
-            flag = False
-            self.recall_count[int(gt_rel[i, 2])-1] += 1
-            for j in range(5):
-                if gt_rel[i, 2] == topk[idx, j]:
-                    self.topk_pred.append(j+1)
-                    self.recall_category[int(gt_rel[i, 2])-1] += 1
-                    flag = True
-                    break
-            if flag is False:
-                self.topk_pred.append(5+1)
-        return self.topk_pred
-
-    def final_update(self):
-        ntopk_pred = np.asarray(self.topk_pred)
-        len_ntop_pred = len(ntopk_pred)
-        self.recall[1] = (ntopk_pred <= 1).sum() / len_ntop_pred
-        self.recall[3] = (ntopk_pred <= 3).sum() / len_ntop_pred
-        self.recall[5] = (ntopk_pred <= 5).sum() / len_ntop_pred
-        self.recall_category = self.recall_category / self.recall_count
-
-    def print_string(self):
-        return ('Predicate R@1: %f; ' % self.recall[1]) + ('Predicate R@3: %f; ' % self.recall[3]) + ('Predicate R@5: %f; ' % self.recall[5])
-
-    def reset(self):
-        self.__init__()
-
-class Relation_Recall():
-    def __init__(self, len_dataset, need_softmax=True):
+class Set_Relation_Recall():
+    def __init__(self, len_dataset, set_type, need_softmax=True ):
         self.recall = {20: 0, 50: 0, 100: 0}
         self.ngc_recall = {20: 0, 50: 0, 100: 0}
         self.m_recall = {20: 0, 50: 0, 100: 0}
-        self.m_recall_cat = np.zeros((4, 26))
         self.len_dataset = len_dataset
         self.need_softmax = need_softmax
+        self.ngc_top20 = []
+        self.set_type = set_type
+        if self.set_type =="support":  self.set_label=support_label
+        if self.set_type =="proximity":  self.set_label=proximity_label
+        if self.set_type =="comparative":  self.set_label=comparative_label
+        if self.set_type =="head":  self.set_label=head_label
+        if self.set_type =="body":  self.set_label=body_label
+        if self.set_type == "tail":  self.set_label=tail_label
+        self.m_recall_cat = np.zeros((4, 26))#len(self.set_label)))
 
-    def calculate_recall(self, obj_output, pred_output, gt_obj, gt_rel):
+    def filter_rel(self, gt_rel, set_label):
+        gt_rel_set = []#torch.zeros((gt_rel.shape[0],3)).cuda()
+        for rel in gt_rel:
+            if rel[2] in set_label:
+                gt_rel_set.append(rel)
+        if len(gt_rel_set) != 0:
+            gt_rel_set = torch.stack(gt_rel_set)
+        if len(gt_rel_set)==0:
+            gt_rel_set =torch.tensor(gt_rel_set)
+        return gt_rel_set
+
+    #def calculate_recall(self, obj_output, pred_output, gt_obj, gt_rel):
+    def calculate_Set_recall(self, obj_output, heter_edge_output, gt_obj, gt_rel):
         obj_num = gt_obj.shape[0]
         # prepare predicted relation triplet
+        pred_output_s, pred_output_p, pred_output_c = heter_edge_output
+        nps, npp, npc = pred_output_s.cpu().numpy(), pred_output_p.cpu().numpy(),pred_output_c.cpu().numpy()
+
+        # (Ne,2)     (Ne,15) 1,14~26   (Ne,7) 2~7    (Ne,7) 8~13
+        pred_output = torch.zeros((obj_num * obj_num - obj_num, 27)).cuda()
+        pred_output[:, 1] = pred_output_s[:, 1]
+        pred_output[:, 14:27] = pred_output_s[:, 2:15]
+        pred_output[:, 2:8] = pred_output_p[:, 1:7]
+        pred_output[:, 8:14] = pred_output_c[:, 1:7]
+        #pred_output = F.softmax(pred_output, dim=1) #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+        gt_rel_set = self.filter_rel(gt_rel, self.set_label)
+
         if self.need_softmax:
             obj_scores = F.softmax(obj_output, dim=1).cpu().numpy()
             pred_scores = F.softmax(pred_output, dim=1).cpu().numpy()
@@ -1232,20 +734,23 @@ class Relation_Recall():
         obj_inds = np.array([[i, j] for i in range(obj_num) for j in range(obj_num) if i != j])
         obj_score = obj_scores.max(1)
         pred_score = pred_scores[:, 1:].max(1)
+
         obj_output = obj_scores.argmax(1)
         pred_output = pred_scores[:, 1:].argmax(1) + 1
-
         triplet, triplet_score = _triplet(obj_inds, obj_output, pred_output, obj_score, pred_score)
+        '''obj_score = np.ones(obj_num)
+        obj_output = gt_obj.cpu().numpy()
+        triplet, triplet_score = _triplet(obj_inds, obj_output, pred_output, obj_score, pred_score)'''
 
         sorted_triplet = triplet[np.argsort(-triplet_score)]
         # prepare gt relation triplet
-        if gt_rel.shape[0] == 0:
+        if gt_rel_set.shape[0] == 0:
             for k in self.ngc_recall:
                 self.recall[k] += 0
             return
-        gt_obj_inds = gt_rel[:, :2].cpu().numpy()
+        gt_obj_inds = gt_rel_set[:, :2].cpu().numpy()
         gt_obj = gt_obj.cpu().numpy()
-        gt_pred = gt_rel[:, 2].cpu().numpy()
+        gt_pred = gt_rel_set[:, 2].cpu().numpy()
         gt_triplet = _triplet(gt_obj_inds, gt_obj, gt_pred, None, None)
 
         # calculate matches
@@ -1255,13 +760,17 @@ class Relation_Recall():
             self.m_recall_cat[0, gt_triplet[i, 1]-1] += 1
         # calculate recalls
         value = 0
+        rel_edges = gt_rel_set[:, :2]
+
         for k in self.recall:
             # the following code are copied from Neural-MOTIFS
             match = reduce(np.union1d, pred_to_gt[:k]).astype('int16')
-            rec_i = float(len(match)) / float(gt_rel.shape[0])
+            rec_i = float(len(match)) / float(gt_rel_set.shape[0])
             self.recall[k] += rec_i
             if k == 50:
                 value = rec_i
+                #print(rec_i)
+
             if k == 20:
                 for i in range(match.shape[0]):
                     self.m_recall_cat[1, gt_triplet[match[i], 1]-1] += 1
@@ -1272,7 +781,7 @@ class Relation_Recall():
                 for i in range(match.shape[0]):
                     self.m_recall_cat[3, gt_triplet[match[i], 1]-1] += 1
 
-    def calculate_ngc_recall(self, obj_output, pred_output, gt_obj, gt_rel):
+    def calculate_Set_ngc_recall(self, obj_output, heter_edge_output, gt_obj, gt_rel):
         obj_num = gt_obj.shape[0]
         # prepare predicted relation triplet
         if self.need_softmax:
@@ -1282,6 +791,493 @@ class Relation_Recall():
         obj_inds = np.array([[i, j] for i in range(obj_num) for j in range(obj_num) if i != j])
         obj_score = obj_scores.max(1)
         obj_output = obj_scores.argmax(1)
+
+        pred_output_s, pred_output_p, pred_output_c = heter_edge_output
+        # (Ne,2)     (Ne,15) 1,14~26   (Ne,7) 2~7    (Ne,7) 8~13
+        pred_output = torch.zeros((obj_num * obj_num - obj_num, 27)).cuda()
+        pred_output[:, 1] = pred_output_s[:, 1]
+        pred_output[:, 14:27] = pred_output_s[:, 2:15]
+        pred_output[:, 2:8] = pred_output_p[:, 1:7]
+        pred_output[:, 8:14] = pred_output_c[:, 1:7]
+        #pred_output = F.softmax(pred_output, dim=1) #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!　注掉！
+        gt_rel_set = self.filter_rel(gt_rel, self.set_label)
+
+        if self.need_softmax:
+            pred_scores = F.softmax(pred_output, dim=1).cpu().numpy()
+        else:
+            pred_scores = pred_output.cpu().numpy()
+
+        obj_scores_per_rel = obj_score[obj_inds].prod(1)
+        ngc_overall_scores = obj_scores_per_rel[:, None] * pred_scores[:, 1:]
+        ngc_overall_scores_1d = ngc_overall_scores.reshape(1, -1)
+        ngc_score_inds = np.argsort(-ngc_overall_scores_1d)[0][:100]
+        ngc_score_inds = np.unravel_index(ngc_score_inds, pred_scores[:, 1:].shape)
+        ngc_score_inds = np.column_stack((ngc_score_inds[0], ngc_score_inds[1]))
+        ngc_obj_inds = obj_inds[ngc_score_inds[:, 0]]
+        ngc_pred_scores = pred_scores[ngc_score_inds[:, 0], ngc_score_inds[:, 1]+1]
+        triplet, triplet_score = _triplet(ngc_obj_inds, obj_output, ngc_score_inds[:, 1]+1, obj_score, ngc_pred_scores)
+        # prepare gt relation triplet
+        if gt_rel_set.shape[0] == 0:
+            for k in self.ngc_recall:
+                self.ngc_recall[k] += 0
+            return
+        gt_obj_inds = gt_rel_set[:, :2].cpu().numpy()
+        gt_obj = gt_obj.cpu().numpy()
+        gt_pred = gt_rel_set[:, 2].cpu().numpy()
+        gt_triplet = _triplet(gt_obj_inds, gt_obj, gt_pred, None, None)
+        #print("gt_obj", gt_obj )
+        #print("gt_rel:", gt_rel)
+        gtt_id =0
+        for gtt in gt_triplet:
+            gtt_id +=1
+            subj, pred, obj = gtt
+            #print(gtt_id, " gt_triplet: ",  classes[subj], "+", relationships[pred],"->", classes[obj])
+        # calculate matches
+        pred_to_gt = _compute_pred_matches(gt_triplet, triplet)
+        #print("NGC pred scores:",ngc_pred_scores[:20])
+        # calculate recalls
+        for k in self.ngc_recall:
+            # the following code are copied from Neural-MOTIFS
+            match = reduce(np.union1d, pred_to_gt[:k])
+            rec_i = float(len(match)) / float(gt_rel_set.shape[0])
+            if k==20:
+                self.ngc_top20.append(round(rec_i*100,2))
+                #print(rec_i)
+                #print("match_k20: ", match)
+
+            self.ngc_recall[k] += rec_i
+        return self.ngc_recall
+
+    def final_update(self):
+        for k in self.recall:
+            self.recall[k] /= self.len_dataset
+            self.ngc_recall[k] /= self.len_dataset
+            for i in range(26):
+                if self.m_recall_cat[0, i] != 0:
+                    if k == 20:
+                        self.m_recall_cat[1, i] /= self.m_recall_cat[0, i]
+                    if k == 50:
+                        self.m_recall_cat[2, i] /= self.m_recall_cat[0, i]
+                        #print("Predicate_R3:", self.m_recall_cat[2, i])
+                    if k == 100:
+                        self.m_recall_cat[3, i] /= self.m_recall_cat[0, i]
+            if k == 20:
+                #print("Predicate_R20:", self.m_recall_cat[1])
+                self.m_recall[k] = self.m_recall_cat[1].sum()/ len(self.set_label)#.mean()
+            if k == 50:
+                #print("Predicate_R50:", self.m_recall_cat[2])
+                self.m_recall[k] = self.m_recall_cat[2].sum()/ len(self.set_label)#
+            if k == 100:
+                #print("Predicate_R100:", self.m_recall_cat[3])
+                self.m_recall[k] = self.m_recall_cat[3].sum()/ len(self.set_label)#
+
+    def print_string(self):
+        recall_res = 'Rel R@20: %f; ' % (self.recall[20]) + 'Rel R@50: %f; ' % (self.recall[50]) + 'Rel R@100: %f; ' % (self.recall[100])
+        recall_res_ngc = 'Rel R@20: %f; ' % (self.ngc_recall[20]) + 'Rel R@50: %f; ' % (self.ngc_recall[50]) + 'Rel R@100: %f;' % (self.ngc_recall[100])
+        recall_res_m = 'Rel R@20: %f; ' % (self.m_recall[20]) + 'Rel R@50: %f; ' % (self.m_recall[50]) + 'Rel R@100: %f;' % (self.m_recall[100])
+        return recall_res, recall_res_ngc, recall_res_m
+
+    def reset(self):
+        self.__init__()
+
+class Type_Relation_Recall():
+    def __init__(self, len_dataset, set_type, need_softmax=True ):
+        self.recall = {20: 0, 50: 0, 100: 0}
+        self.ngc_recall = {20: 0, 50: 0, 100: 0}
+        self.m_recall = {20: 0, 50: 0, 100: 0}
+        self.len_dataset = len_dataset
+        self.need_softmax = need_softmax
+        self.ngc_top20 = []
+        self.set_type = set_type
+        if self.set_type =="support":  self.set_label=support_label
+        if self.set_type =="proximity":  self.set_label=proximity_label
+        if self.set_type =="comparative":  self.set_label=comparative_label
+
+        self.m_recall_cat = np.zeros((4, 26))#len(self.set_label)))
+
+    def filter_rel(self, gt_rel, set_label):
+        gt_rel_set = []#torch.zeros((gt_rel.shape[0],3)).cuda()
+        for rel in gt_rel:
+            if rel[2] in set_label:
+                gt_rel_set.append(rel)
+        if len(gt_rel_set) != 0:
+            gt_rel_set = torch.stack(gt_rel_set)
+        if len(gt_rel_set)==0:
+            gt_rel_set =torch.tensor(gt_rel_set)
+        return gt_rel_set
+
+    #def calculate_recall(self, obj_output, pred_output, gt_obj, gt_rel):
+    def calculate_separa_recall(self, obj_output, heter_edge_output, gt_obj, gt_rel):
+        obj_num = gt_obj.shape[0]
+        # prepare predicted relation triplet
+        pred_output_s, pred_output_p, pred_output_c = heter_edge_output
+        nps, npp, npc = pred_output_s.cpu().numpy(), pred_output_p.cpu().numpy(),pred_output_c.cpu().numpy()
+
+        # (Ne,2)     (Ne,15) 1,14~26   (Ne,7) 2~7    (Ne,7) 8~13
+        if self.set_type=="support":
+            pred_output = torch.zeros((obj_num * obj_num - obj_num, 27)).cuda()
+            pred_output[:, 1] = pred_output_s[:, 1]
+            pred_output[:, 14:27] = pred_output_s[:, 2:15]
+        elif self.set_type=="proximity":
+            pred_output = torch.zeros((obj_num * obj_num - obj_num,27)).cuda()
+            pred_output[:, 2:8] = pred_output_p[:, 1:7]
+        elif self.set_type=="comparative":
+            pred_output = torch.zeros((obj_num * obj_num - obj_num,27)).cuda()
+            pred_output[:, 8:14] = pred_output_c[:, 1:7]
+        #pred_output = F.softmax(pred_output, dim=1) #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+        gt_rel_set = self.filter_rel(gt_rel, self.set_label)
+
+        if self.need_softmax:
+            obj_scores = F.softmax(obj_output, dim=1).cpu().numpy()
+            pred_scores = F.softmax(pred_output, dim=1).cpu().numpy()
+        else:
+            obj_scores = obj_output.cpu().numpy()
+            pred_scores = pred_output.cpu().numpy()
+        obj_inds = np.array([[i, j] for i in range(obj_num) for j in range(obj_num) if i != j])
+        obj_score = obj_scores.max(1)
+        pred_score = pred_scores[:, 1:].max(1)
+
+        obj_output = obj_scores.argmax(1)
+        pred_output = pred_scores[:, 1:].argmax(1) + 1
+        triplet, triplet_score = _triplet(obj_inds, obj_output, pred_output, obj_score, pred_score)
+        '''obj_score = np.ones(obj_num)
+        obj_output = gt_obj.cpu().numpy()
+        triplet, triplet_score = _triplet(obj_inds, obj_output, pred_output, obj_score, pred_score)'''
+
+        sorted_triplet = triplet[np.argsort(-triplet_score)]
+        # prepare gt relation triplet
+        if gt_rel_set.shape[0] == 0:
+            for k in self.ngc_recall:
+                self.recall[k] += 0
+            return
+        gt_obj_inds = gt_rel_set[:, :2].cpu().numpy()
+        gt_obj = gt_obj.cpu().numpy()
+        gt_pred = gt_rel_set[:, 2].cpu().numpy()
+        gt_triplet = _triplet(gt_obj_inds, gt_obj, gt_pred, None, None)
+
+        # calculate matches
+        pred_to_gt = _compute_pred_matches(gt_triplet, sorted_triplet)
+
+        # calculate recalls
+        value = 0
+        rel_edges = gt_rel_set[:, :2]
+
+        for k in self.recall:
+            # the following code are copied from Neural-MOTIFS
+            match = reduce(np.union1d, pred_to_gt[:k]).astype('int16')
+            rec_i = float(len(match)) / float(gt_rel_set.shape[0])
+            self.recall[k] += rec_i
+            if k == 50:
+                value = rec_i
+                #print(rec_i)
+
+
+    def calculate_separa_mean_recall(self, obj_output, heter_edge_output, gt_obj, gt_rel):
+        obj_num = gt_obj.shape[0]
+        # prepare predicted relation triplet
+        pred_output_s, pred_output_p, pred_output_c = heter_edge_output
+        #pred_output_p = F.softmax(pred_output_p, dim=1)
+        nps, npp, npc = pred_output_s.cpu().numpy(), pred_output_p.cpu().numpy(),pred_output_c.cpu().numpy()
+        if self.set_type=="support":
+            pred_output = torch.zeros((obj_num * obj_num - obj_num, 27)).cuda()
+            pred_output[:, 1] = pred_output_s[:, 1]
+            pred_output[:, 14:27] = pred_output_s[:, 2:15]
+        elif self.set_type=="proximity":
+            pred_output = torch.zeros((obj_num * obj_num - obj_num,27)).cuda()
+            pred_output[:, 2:8] = pred_output_p[:, 1:7]
+        elif self.set_type=="comparative":
+            pred_output = torch.zeros((obj_num * obj_num - obj_num,27)).cuda()
+            pred_output[:, 8:14] = pred_output_c[:, 1:7]
+
+        gt_rel_set = self.filter_rel(gt_rel, self.set_label)
+
+        if self.need_softmax:
+            obj_scores = F.softmax(obj_output, dim=1).cpu().numpy()
+            pred_scores = F.softmax(pred_output, dim=1).cpu().numpy()
+        else:
+            obj_scores = obj_output.cpu().numpy()
+            pred_scores = pred_output.cpu().numpy()
+        obj_inds = np.array([[i, j] for i in range(obj_num) for j in range(obj_num) if i != j])
+        obj_score = obj_scores.max(1)
+        pred_score = pred_scores[:, 1:].max(1)
+
+        obj_output = obj_scores.argmax(1)
+        pred_output = pred_scores[:, 1:].argmax(1) + 1
+        triplet, triplet_score = _triplet(obj_inds, obj_output, pred_output, obj_score, pred_score)
+        '''obj_score = np.ones(obj_num)
+        obj_output = gt_obj.cpu().numpy()
+        triplet, triplet_score = _triplet(obj_inds, obj_output, pred_output, obj_score, pred_score)'''
+
+        sorted_triplet = triplet[np.argsort(-triplet_score)]
+        # prepare gt relation triplet
+        if gt_rel_set.shape[0] == 0:
+            for k in self.ngc_recall:
+                self.recall[k] += 0
+            return
+        gt_obj_inds = gt_rel_set[:, :2].cpu().numpy()
+        gt_obj = gt_obj.cpu().numpy()
+        gt_pred = gt_rel_set[:, 2].cpu().numpy()
+        gt_triplet = _triplet(gt_obj_inds, gt_obj, gt_pred, None, None)
+
+        # calculate matches
+        pred_to_gt = _compute_pred_matches(gt_triplet, sorted_triplet)
+
+        for i in range(gt_triplet.shape[0]):
+            self.m_recall_cat[0, gt_triplet[i, 1]-1] += 1
+        # calculate recalls
+        value = 0
+        rel_edges = gt_rel_set[:, :2]
+
+        for k in self.m_recall:
+            # the following code are copied from Neural-MOTIFS
+            match = reduce(np.union1d, pred_to_gt[:k]).astype('int16')
+            rec_i = float(len(match)) / float(gt_rel_set.shape[0])
+
+            if k == 20:
+                for i in range(match.shape[0]):
+                    self.m_recall_cat[1, gt_triplet[match[i], 1]-1] += 1
+            if k == 50:
+                for i in range(match.shape[0]):
+                    self.m_recall_cat[2, gt_triplet[match[i], 1]-1] += 1
+            if k == 100:
+                for i in range(match.shape[0]):
+                    self.m_recall_cat[3, gt_triplet[match[i], 1]-1] += 1
+
+    def calculate_separa_ngc_recall(self, obj_output, heter_edge_output, gt_obj, gt_rel):
+        obj_num = gt_obj.shape[0]
+        # prepare predicted relation triplet
+        if self.need_softmax:
+            obj_scores = F.softmax(obj_output, dim=1).cpu().numpy()
+        else:
+            obj_scores = obj_output.cpu().numpy()
+        obj_inds = np.array([[i, j] for i in range(obj_num) for j in range(obj_num) if i != j])
+        obj_score = obj_scores.max(1)
+        obj_output = obj_scores.argmax(1)
+
+        pred_output_s, pred_output_p, pred_output_c = heter_edge_output
+        # (Ne,2)     (Ne,15) 1,14~26   (Ne,7) 2~7    (Ne,7) 8~13
+        if self.set_type == "support":
+            pred_output = torch.zeros((obj_num * obj_num - obj_num, 27)).cuda()
+            pred_output[:, 1] = pred_output_s[:, 1]
+            pred_output[:, 14:27] = pred_output_s[:, 2:15]
+        elif self.set_type == "proximity":
+            pred_output = torch.zeros((obj_num * obj_num - obj_num, 27)).cuda()
+            pred_output[:, 2:8] = pred_output_p[:, 1:7]
+        elif self.set_type == "comparative":
+            pred_output = torch.zeros((obj_num * obj_num - obj_num, 27)).cuda()
+            pred_output[:, 8:14] = pred_output_c[:, 1:7]
+        gt_rel_set = self.filter_rel(gt_rel, self.set_label)
+
+        if self.need_softmax:
+            pred_scores = F.softmax(pred_output, dim=1).cpu().numpy()
+        else:
+            pred_scores = pred_output.cpu().numpy()
+
+        obj_scores_per_rel = obj_score[obj_inds].prod(1)
+        ngc_overall_scores = obj_scores_per_rel[:, None] * pred_scores[:, 1:]
+        ngc_overall_scores_1d = ngc_overall_scores.reshape(1, -1)
+        ngc_score_inds = np.argsort(-ngc_overall_scores_1d)[0][:100]
+        ngc_score_inds = np.unravel_index(ngc_score_inds, pred_scores[:, 1:].shape)
+        ngc_score_inds = np.column_stack((ngc_score_inds[0], ngc_score_inds[1]))
+        ngc_obj_inds = obj_inds[ngc_score_inds[:, 0]]
+        ngc_pred_scores = pred_scores[ngc_score_inds[:, 0], ngc_score_inds[:, 1]+1]
+        triplet, triplet_score = _triplet(ngc_obj_inds, obj_output, ngc_score_inds[:, 1]+1, obj_score, ngc_pred_scores)
+        # prepare gt relation triplet
+        if gt_rel_set.shape[0] == 0:
+            for k in self.ngc_recall:
+                self.ngc_recall[k] += 0
+            return
+        gt_obj_inds = gt_rel_set[:, :2].cpu().numpy()
+        gt_obj = gt_obj.cpu().numpy()
+        gt_pred = gt_rel_set[:, 2].cpu().numpy()
+        gt_triplet = _triplet(gt_obj_inds, gt_obj, gt_pred, None, None)
+        #print("gt_obj", gt_obj )
+        #print("gt_rel:", gt_rel)
+        gtt_id =0
+        for gtt in gt_triplet:
+            gtt_id +=1
+            subj, pred, obj = gtt
+            #print(gtt_id, " gt_triplet: ",  classes[subj], "+", relationships[pred],"->", classes[obj])
+        # calculate matches
+        pred_to_gt = _compute_pred_matches(gt_triplet, triplet)
+        #print("NGC pred scores:",ngc_pred_scores[:20])
+        # calculate recalls
+        for k in self.ngc_recall:
+            # the following code are copied from Neural-MOTIFS
+            match = reduce(np.union1d, pred_to_gt[:k])
+            rec_i = float(len(match)) / float(gt_rel_set.shape[0])
+            if k==20:
+                self.ngc_top20.append(round(rec_i*100,2))
+                #print(rec_i)
+                #print("match_k20: ", match)
+
+            self.ngc_recall[k] += rec_i
+        return self.ngc_recall
+
+    def final_update(self):
+        for k in self.recall:
+            self.recall[k] /= self.len_dataset
+            self.ngc_recall[k] /= self.len_dataset
+            for i in range(26):
+                if self.m_recall_cat[0, i] != 0:
+                    if k == 20:
+                        self.m_recall_cat[1, i] /= self.m_recall_cat[0, i]
+                    if k == 50:
+                        self.m_recall_cat[2, i] /= self.m_recall_cat[0, i]
+                        #print("Predicate_R3:", self.m_recall_cat[2, i])
+                    if k == 100:
+                        self.m_recall_cat[3, i] /= self.m_recall_cat[0, i]
+            if k == 20:
+                #print("Predicate_R20:", self.m_recall_cat[1])
+                self.m_recall[k] = self.m_recall_cat[1].sum()/ len(self.set_label)#.mean()
+            if k == 50:
+                #print("Predicate_R50:", self.m_recall_cat[2])
+                self.m_recall[k] = self.m_recall_cat[2].sum()/ len(self.set_label)#
+            if k == 100:
+                #print("Predicate_R100:", self.m_recall_cat[3])
+                self.m_recall[k] = self.m_recall_cat[3].sum()/ len(self.set_label)#
+
+    def print_string(self):
+        recall_res = 'Rel R@20: %f; ' % (self.recall[20]) + 'Rel R@50: %f; ' % (self.recall[50]) + 'Rel R@100: %f; ' % (self.recall[100])
+        recall_res_ngc = 'Rel R@20: %f; ' % (self.ngc_recall[20]) + 'Rel R@50: %f; ' % (self.ngc_recall[50]) + 'Rel R@100: %f;' % (self.ngc_recall[100])
+        recall_res_m = 'Rel R@20: %f; ' % (self.m_recall[20]) + 'Rel R@50: %f; ' % (self.m_recall[50]) + 'Rel R@100: %f;' % (self.m_recall[100])
+        return recall_res, recall_res_ngc, recall_res_m
+
+    def reset(self):
+        self.__init__()
+
+class Type_Relation_Recall_old():
+    def __init__(self, len_dataset, need_softmax=True):
+        self.type_recall = {20: 0, 50: 0, 100: 0}
+        self.type_ngc_recall = {20: 0, 50: 0, 100: 0}
+        self.type_m_recall = {20: 0, 50: 0, 100: 0}
+        self.type_m_recall_cat = np.zeros((4, 3))
+        self.len_dataset = len_dataset
+        self.need_softmax = need_softmax
+        self.type_ngc_top20 = []
+
+    def gen_Type_outputs(edge_outputs):
+        none_weight, edge_output_s, edge_output_p, edge_output_c = edge_outputs  # .clone()
+        support_weight = torch.sum((edge_output_s[:, 1:15]), dim=1)
+        p_weight = torch.sum((edge_output_p[:, 1:7]), dim=1)
+        c_weight = torch.sum((edge_output_c[:, 1:7]), dim=1)
+        type_output = torch.stack([none_weight, support_weight, p_weight, c_weight], dim=0)
+        return type_output
+
+    def gen_type_gt(self, gt_pred):
+
+        type_gt_pred = torch.zeros((gt_pred.shape[0])).cuda()
+        for i in range(gt_pred.shape[0]):
+            if gt_pred[i] in support_label: type_gt_pred[i]=1
+            if gt_pred[i] in proximity_label: type_gt_pred[i]=2
+            if gt_pred[i] in comparative_label: type_gt_pred[i]=3
+        return type_gt_pred
+
+    def calculate_Type_recall(self, obj_output, heter_edge_output, gt_obj, gt_rel):
+        obj_num = gt_obj.shape[0]
+        # prepare predicted relation triplet
+        pred_output_s, pred_output_p, pred_output_c = heter_edge_output
+        nps, npp, npc = pred_output_s.cpu().numpy(), pred_output_p.cpu().numpy(),pred_output_c.cpu().numpy()
+        # (Ne,2)     (Ne,15) 1,14~26   (Ne,7) 2~7    (Ne,7) 8~13
+        pred_output = torch.zeros((obj_num * obj_num - obj_num, 27)).cuda()
+        pred_output[:, 1] = pred_output_s[:, 1]
+        pred_output[:, 14:27] = pred_output_s[:, 2:15]
+        pred_output[:, 2:8] = pred_output_p[:, 1:7]
+        pred_output[:, 8:14] = pred_output_c[:, 1:7]
+        #pred_output = F.softmax(pred_output, dim=1) #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        pred_output_single = torch.zeros((obj_num * obj_num - obj_num, 4)).cuda()
+
+        pred_output_single[:, 1] = torch.sum(pred_output_s[:, 1:15], dim=1)
+        pred_output_single[:, 2] = torch.sum(pred_output_p[:, 1:7], dim=1)
+        pred_output_single[:, 3] = torch.sum(pred_output_c[:, 1:7], dim=1)
+        np_pred = pred_output_single.cpu().numpy()
+
+        if self.need_softmax:
+            obj_scores = F.softmax(obj_output, dim=1).cpu().numpy()
+            pred_scores = F.softmax(pred_output, dim=1).cpu().numpy()
+        else:
+            obj_scores = obj_output.cpu().numpy()
+            pred_scores = pred_output.cpu().numpy()
+            pred_scores_single = pred_output_single.cpu().numpy()
+        obj_inds = np.array([[i, j] for i in range(obj_num) for j in range(obj_num) if i != j])
+        obj_score = obj_scores.max(1)
+        pred_score = pred_scores[:, 1:].max(1)
+
+        pred_score_single = pred_scores_single[:, 1:].max(1)
+        pred_scores_type = pred_scores_single
+        pred_score_type = pred_score_single
+        obj_output = obj_scores.argmax(1)
+        pred_output_type = pred_scores_type[:, 1:].argmax(1) + 1
+        triplet, triplet_score = _triplet(obj_inds, obj_output, pred_output_type, obj_score, pred_score_type)
+        '''obj_score = np.ones(obj_num)
+        obj_output = gt_obj.cpu().numpy()'''
+        triplet_type, triplet_score_type = _triplet(obj_inds, obj_output, pred_output_type, obj_score, pred_score_type)
+
+        sorted_triplet_type = triplet_type[np.argsort(-triplet_score_type)]
+        # prepare gt relation triplet
+        if gt_rel.shape[0] == 0:
+            for k in self.type_ngc_recall:
+                self.type_recall[k] += 0
+            return
+        gt_obj_inds = gt_rel[:, :2].cpu().numpy()
+        gt_obj = gt_obj.cpu().numpy()
+        gt_pred = gt_rel[:, 2].cpu().numpy()
+        type_gt_pred = self.gen_type_gt(gt_pred).int()
+        type_gt_pred= type_gt_pred.cpu().numpy()
+
+        type_gt_triplet = _triplet(gt_obj_inds, gt_obj, type_gt_pred, None, None)
+
+        # calculate matches
+        type_pred_to_gt = _compute_pred_matches(type_gt_triplet, sorted_triplet_type)
+
+        for i in range(type_gt_triplet.shape[0]):
+            self.type_m_recall_cat[0, type_gt_triplet[i, 1]-1] += 1
+        # calculate recalls
+        value = 0
+        rel_edges = gt_rel[:, :2]
+        num_single_rel = torch.unique(rel_edges,dim=0).shape[0]
+
+        for k in self.type_recall:
+            # the following code are copied from Neural-MOTIFS
+            match = reduce(np.union1d, type_pred_to_gt[:k]).astype('int16')
+            rec_i = float(len(match)) / float(gt_rel.shape[0])
+            #rec_i = float(len(match)) / float(num_single_rel)
+            self.type_recall[k] += rec_i
+            if k == 50:
+                value = rec_i
+                #print(rec_i)
+
+            if k == 20:
+                for i in range(match.shape[0]):
+                    self.type_m_recall_cat[1, type_gt_triplet[match[i], 1]-1] += 1
+            if k == 50:
+                for i in range(match.shape[0]):
+                    self.type_m_recall_cat[2, type_gt_triplet[match[i], 1]-1] += 1
+            if k == 100:
+                for i in range(match.shape[0]):
+                    self.type_m_recall_cat[3, type_gt_triplet[match[i], 1]-1] += 1
+
+    def calculate_Type_ngc_recall(self, obj_output, heter_edge_output, gt_obj, gt_rel):
+        obj_num = gt_obj.shape[0]
+        # prepare predicted relation triplet
+        if self.need_softmax:
+            obj_scores = F.softmax(obj_output, dim=1).cpu().numpy()
+        else:
+            obj_scores = obj_output.cpu().numpy()
+        obj_inds = np.array([[i, j] for i in range(obj_num) for j in range(obj_num) if i != j])
+        obj_score = obj_scores.max(1)
+        obj_output = obj_scores.argmax(1)
+
+        pred_output_s, pred_output_p, pred_output_c = heter_edge_output
+        # (Ne,2)     (Ne,15) 1,14~26   (Ne,7) 2~7    (Ne,7) 8~13
+        pred_output = torch.zeros((obj_num * obj_num - obj_num, 27)).cuda()
+        pred_output[:, 1] = pred_output_s[:, 1]
+        pred_output[:, 14:27] = pred_output_s[:, 2:15]
+        pred_output[:, 2:8] = pred_output_p[:, 1:7]
+        pred_output[:, 8:14] = pred_output_c[:, 1:7]
+        #pred_output = F.softmax(pred_output, dim=1) #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!　注掉！
+
         if self.need_softmax:
             pred_scores = F.softmax(pred_output, dim=1).cpu().numpy()
         else:
@@ -1298,252 +1294,65 @@ class Relation_Recall():
         triplet, triplet_score = _triplet(ngc_obj_inds, obj_output, ngc_score_inds[:, 1]+1, obj_score, ngc_pred_scores)
         # prepare gt relation triplet
         if gt_rel.shape[0] == 0:
-            for k in self.ngc_recall:
-                self.ngc_recall[k] += 0
+            for k in self.type_ngc_recall:
+                self.type_ngc_recall[k] += 0
             return
         gt_obj_inds = gt_rel[:, :2].cpu().numpy()
         gt_obj = gt_obj.cpu().numpy()
         gt_pred = gt_rel[:, 2].cpu().numpy()
         gt_triplet = _triplet(gt_obj_inds, gt_obj, gt_pred, None, None)
-
+        #print("gt_obj", gt_obj )
+        #print("gt_rel:", gt_rel)
+        gtt_id =0
+        for gtt in gt_triplet:
+            gtt_id +=1
+            subj, pred, obj = gtt
+            #print(gtt_id, " gt_triplet: ",  classes[subj], "+", relationships[pred],"->", classes[obj])
         # calculate matches
         pred_to_gt = _compute_pred_matches(gt_triplet, triplet)
-
+        #print("NGC pred scores:",ngc_pred_scores[:20])
         # calculate recalls
-        for k in self.ngc_recall:
+        for k in self.type_ngc_recall:
             # the following code are copied from Neural-MOTIFS
             match = reduce(np.union1d, pred_to_gt[:k])
             rec_i = float(len(match)) / float(gt_rel.shape[0])
-            self.ngc_recall[k] += rec_i
-        return self.ngc_recall
+            if k==20:
+                self.type_ngc_top20.append(round(rec_i*100,2))
+                #print(rec_i)
+                #print("match_k20: ", match)
+
+            self.type_ngc_recall[k] += rec_i
+        return self.type_ngc_recall
 
     def final_update(self):
-        for k in self.recall:
-            self.recall[k] /= self.len_dataset
-            self.ngc_recall[k] /= self.len_dataset
-            for i in range(26):
-                if self.m_recall_cat[0, i] != 0:
+        for k in self.type_recall:
+            self.type_recall[k] /= self.len_dataset
+            #self.type_ngc_recall[k] /= self.len_dataset
+            for i in range(3):
+                if self.type_m_recall_cat[0, i] != 0:
                     if k == 20:
-                        self.m_recall_cat[1, i] /= self.m_recall_cat[0, i]
+                        self.type_m_recall_cat[1, i] /= self.type_m_recall_cat[0, i]
                     if k == 50:
-                        self.m_recall_cat[2, i] /= self.m_recall_cat[0, i]
+                        self.type_m_recall_cat[2, i] /= self.type_m_recall_cat[0, i]
+                        #print("Predicate_R3:", self.m_recall_cat[1, i])
                     if k == 100:
-                        self.m_recall_cat[3, i] /= self.m_recall_cat[0, i]
+                        self.type_m_recall_cat[3, i] /= self.type_m_recall_cat[0, i]
             if k == 20:
-                self.m_recall[k] = self.m_recall_cat[1].mean()
+                #print("Type Predicate_mR20:", self.type_m_recall_cat[1])
+                self.type_m_recall[k] = self.type_m_recall_cat[1].mean()
             if k == 50:
-                self.m_recall[k] = self.m_recall_cat[2].mean()
+                #print("Type Predicate_mR50:", self.type_m_recall_cat[2])
+                self.type_m_recall[k] = self.type_m_recall_cat[2].mean()
             if k == 100:
-                self.m_recall[k] = self.m_recall_cat[3].mean()
+                #print("Type Predicate_mR100:", self.type_m_recall_cat[3])
+                self.type_m_recall[k] = self.type_m_recall_cat[3].mean()
 
     def print_string(self):
-        recall_res = 'Rel R@20: %f; ' % (self.recall[20]) + 'Rel R@50: %f; ' % (self.recall[50]) + 'Rel R@100: %f;' % (self.recall[100])
-        recall_res_ngc = 'Rel R@20: %f; ' % (self.ngc_recall[20]) + 'Rel R@50: %f; ' % (self.ngc_recall[50]) + 'Rel R@100: %f;' % (self.ngc_recall[100])
-        recall_res_m = 'Rel R@20: %f; ' % (self.m_recall[20]) + 'Rel R@50: %f; ' % (self.m_recall[50]) + 'Rel R@100: %f;' % (self.m_recall[100])
-        return recall_res, recall_res_ngc, recall_res_m
-
-    def reset(self):
-        self.__init__()
-
-class Edge_Accuracy():
-    def __init__(self,len_dataset, need_softmax=True):
-        self.len_dataset = len_dataset
-        self.type_binary_acc_all = 0
-        self.type_binary_acc_1 = 0
-        self.link_binary_acc_1 = 0
-        self.binary_recall = 0
-        self.acc = 0
-        self.acc_type_1 =0
-        self.acc_mean = 0.0
-        self.acc_category = np.zeros(3)
-        self.acc_category_type_1 = np.zeros(3)
-        self.count_category = np.zeros(3)
-        self.count_category_type_1 = np.zeros(3)
-        self.type_acc_1 = [0,0]
-
-        self.need_softmax = need_softmax
-
-
-    def calculate_accuracy_binary_link(self, insnum, link_output, gt_rel):
-        link_output = F.softmax(link_output, dim=1)
-        link_label = torch.argmax(link_output, dim=1)
-        '''al = 2.2
-        be = 0.025
-        if link_output[:]> 1/al +be:
-            link_label[:]=1
-        else: link_label[:]=0'''
-
-        gt = torch.zeros(link_label.shape[0])
-        correct_count_1 = 0
-        pairs = gt_rel[:,:2]
-        real_edge = torch.unique(pairs,dim=0)
-        edge_num_1 = real_edge.shape[0]
-        correct_edge_id = []
-        real_edge_id = []
-        for i in range(gt_rel.shape[0]):
-            idx_i = int(gt_rel[i, 0])
-            idx_j = int(gt_rel[i, 1])
-            idx = 0
-            if idx_i < idx_j:
-                idx = idx_i * (insnum-1) + idx_j - 1
-            elif idx_i > idx_j:
-                idx = idx_i * (insnum-1) + idx_j
-            gt[idx] = 1
-            if idx not in real_edge_id:
-                real_edge_id.append(idx)
-
-        for i in range(gt.shape[0]):
-            if link_label[i] != 0 and gt[i] == 1 and i not in correct_edge_id:
-                correct_count_1 += 1
-                correct_edge_id.append(i)
-        self.link_binary_acc_1 = self.link_binary_acc_1 + (correct_count_1 /edge_num_1)
-        #print("link_binary_acc_1: ", self.link_binary_acc_1 )
-
-
-    def calculate_accuracy_binary_type(self, insnum, type_output, gt_rel):
-        type_output = F.softmax(type_output, dim=1)
-        type_label = torch.argmax(type_output, dim=1)  # for example tensor([ 0,  0,  0, 16, 20, 16,  0,  0,  0,  0,  0,  0], device='cuda:0')
-        gt = torch.zeros(type_label.shape[0])
-        correct_count_all = 0
-        correct_count_1 = 0
-
-        for i in range(gt_rel.shape[0]):
-            idx_i = int(gt_rel[i, 0])
-            idx_j = int(gt_rel[i, 1])
-            idx = 0
-            if idx_i < idx_j:
-                idx = idx_i * (insnum-1) + idx_j - 1
-            elif idx_i > idx_j:
-                idx = idx_i * (insnum-1) + idx_j
-            gt[idx] = 1
-        for i in range(gt.shape[0]):
-            if type_label[i] == 0 and gt[i] == 0:
-                correct_count_all += 1
-            elif type_label[i] != 0 and gt[i] == 1:
-                correct_count_all += 1
-        self.type_binary_acc_all = self.type_binary_acc_all + (correct_count_all / type_label.shape[0])
-        #print("type_binary_acc_all: ", self.type_binary_acc_all )
-
-        pairs = gt_rel[:, :2]
-        real_edge = torch.unique(pairs, dim=0)
-        edge_num_1 = real_edge.shape[0]
-        correct_edge_id = []
-
-        for i in range(gt.shape[0]):
-            if type_label[i] != 0 and gt[i] == 1 and i not in correct_edge_id:
-                correct_count_1 += 1
-                correct_edge_id.append(i)
-        self.type_binary_acc_1 = self.type_binary_acc_1 + (correct_count_1 /edge_num_1)
-        #print("type_binary_acc_1: ", self.type_binary_acc_1 )
-
-
-    def calculate_accuracy(self, insnum, pred_output, gt_rel):
-        pred_output = F.softmax(pred_output, dim=1)
-        pred_label = torch.argmax(pred_output, dim=1)
-        onehot = torch.zeros((insnum * insnum - insnum, 3)).cuda()
-        for i in range(gt_rel.shape[0]):
-            idx_i = gt_rel[i, 0]  #obj
-            idx_j = gt_rel[i, 1]  #suj
-            predgt = gt_rel[i, 2]
-            if (predgt in support_label):
-                type_id = 1
-            elif (predgt in cp_label):
-                type_id = 2
-            else:
-                type_id = 0
-            if idx_i < idx_j:
-                onehot[int(idx_i * (insnum-1) + idx_j - 1), type_id] = 1
-            elif idx_i > idx_j:
-                onehot[int(idx_i * (insnum-1) + idx_j),type_id] = 1
-            self.count_category[type_id] += 1
-
-        '''for i in range(insnum * insnum - insnum):
-            if torch.sum(onehot[i, :]) == 0:
-                onehot[i, 0] = 1
-                self.count_category[0] += 1  # 无边的关系加到 none类别  注意3dssg的none类别不在第0位'''
-        pairs = gt_rel[:, :2]
-        real_edge = torch.unique(pairs, dim=0)
-        edge_num_1 = real_edge.shape[0]
-
-        count = 0
-        for i in range(pred_label.shape[0]):
-            idx = pred_label[i]
-            if idx!=0 and onehot[i, idx] == 1:
-                count += 1
-                self.acc_category[idx] += 1
-        self.acc = self.acc + (count / edge_num_1)
-
-    def calculate_accuracy_type_1(self, insnum, pred_output, gt_rel):
-        pred_output = F.softmax(pred_output, dim=1)
-        pred_label = torch.argmax(pred_output, dim=1)
-        gt = torch.zeros(pred_label.shape[0])
-
-        support_count_1 = 0
-        cp_count_1 = 0
-        correct_count_1 =0
-        real_edge_id = []
-        for i in range(gt_rel.shape[0]):
-            idx_i = int(gt_rel[i, 0])
-            idx_j = int(gt_rel[i, 1])
-            predgt = int(gt_rel[i, 2])
-            if (predgt in support_label):
-                type_id = 1
-            elif (predgt in cp_label):
-                type_id = 2
-            else:
-                type_id = 0 # impossible
-            idx = 0
-            if idx_i < idx_j:
-                idx = idx_i * (insnum - 1) + idx_j - 1
-            elif idx_i > idx_j:
-                idx = idx_i * (insnum - 1) + idx_j
-            gt[idx] = type_id
-            self.count_category_type_1[type_id] += 1
-
-        for i in range(gt.shape[0]):
-            idx = pred_label[i]
-            type_idx = idx
-
-            if type_idx ==1 and gt[i] == 1:
-                support_count_1 += 1
-                self.acc_category_type_1[type_idx] += 1
-            elif type_idx ==2 and gt[i]==2:
-                cp_count_1 += 1
-                self.acc_category_type_1[type_idx] += 1
-            correct_count_1 = support_count_1 + cp_count_1
-        self.acc_type_1 = self.acc_type_1 + (correct_count_1 / gt_rel.shape[0])
-
-    def final_update(self):
-        #self.binary_acc = self.binary_acc / self.len_dataset
-        #self.binary_recall = self.binary_recall / self.len_dataset
-        self.type_binary_acc_all = self.type_binary_acc_all / self.len_dataset
-        self.type_binary_acc_1 = self.type_binary_acc_1 / self.len_dataset
-        self.link_binary_acc_1 = self.link_binary_acc_1  / self.len_dataset
-        self.acc = self.acc / self.len_dataset
-        self.acc_type_1 = self.acc_type_1 / self.len_dataset
-
-        for i in range(3):
-            if self.count_category[i] == 0:
-                self.count_category[i] = 1
-        for i in range(3):
-            if self.count_category_type_1[i] == 0:
-                self.count_category_type_1[i] = 1
-        self.acc_category = self.acc_category / self.count_category
-        self.acc_mean = self.acc_category[1:].mean()
-        self.acc_category_type_1 = self.acc_category_type_1 / self.count_category_type_1
-        self.acc_mean_type_1 = self.acc_category_type_1[1:].mean()
-        self.type_acc_1 = self.acc_category_type_1[1:]
-
-    def print_string(self):
-        res = 'Predicate type Binary_acc_all: %f; ' % self.type_binary_acc_all
-        res +='Predicate type Binary_acc_1: %f; ' % self.type_binary_acc_1
-        res +='Predicate link Binary_acc_1: %f; ' % self.link_binary_acc_1 + 'Relation Acc 1(only edge): %f; ' % self.acc + '\n'
-        res += f' 3 Predicate mean acc: {self.acc_mean}'
-        res += ' 2 type Relation Acc 1(only edge): %f; ' % self.acc_type_1 + '\n'
-        res += f' 2 type Predicate  mean acc 1(only edge): {self.acc_mean_type_1}'+ '\n'
-        res += f' 2 type Predicate acc 1(only edge): {self.type_acc_1}'
-
-        return res
+        recall_res = 'Rel R@20: %f; ' % (self.type_recall[20]) + 'Rel R@50: %f; ' % (self.type_recall[50]) + 'Rel ' \
+                                                                                                  'R@100: %f;' % (self.type_recall[100])
+        #recall_res_ngc = 'Rel R@20: %f; ' % (self.type_ngc_recall[20]) + 'Rel R@50: %f; ' % (self.type_ngc_recall[50]) + 'Rel R@100: %f;' % (self.type_ngc_recall[100])
+        recall_res_m = 'Rel R@20: %f; ' % (self.type_m_recall[20]) + 'Rel R@50: %f; ' % (self.type_m_recall[50]) + 'Rel R@100: %f;' % (self.type_m_recall[100])
+        return recall_res,  recall_res_m
 
     def reset(self):
         self.__init__()
@@ -1572,6 +1381,10 @@ def _compute_pred_matches(gt_triplets, pred_triplets):
     # The rows correspond to GT triplets, columns to pred triplets
     keeps = intersect_2d(gt_triplets, pred_triplets)
     gt_has_match = keeps.any(1)
+    #print("gt_has_match: ",gt_has_match)
+    #print("gt_triplets:", gt_triplets)
+
+    #print("pred_triplets_K20: ", pred_triplets[:20])
     pred_to_gt = [[] for x in range(pred_triplets.shape[0])]
     for gt_ind, keep_inds in zip(np.where(gt_has_match)[0], keeps[gt_has_match]):
         for i in np.where(keep_inds)[0]:
@@ -1593,60 +1406,3 @@ def intersect_2d(x1, x2):
     # Instead of summing, we want the equality, so we reduce in that way
     res = (x1[..., None] == x2.T[None, ...]).all(1)
     return res
-
-def add_transitive_relation(relations):
-    transtions = set()
-    relations = relations.tolist()
-    relation_set = {tuple(relation) for relation in relations}
-    for i in range(len(relations)):
-        a, b, pred = relations[i][0],relations[i][1],relations[i][2]
-        a,b,pred = int(a),int(b), int(pred)
-
-        for j in range(len(relations)):
-            if (b== relations[j][0])& (pred ==relations[j][2]):
-                    c = relations[j][1]
-                    if (a,c,pred) in relation_set:
-                        #print(((a,b),(b,c),(a,c)))
-                        transtions.add(((a,b,pred),(b,c,pred),(a,c,pred)))
-    return len(transtions),transtions
-
-
-def refine_transi(insnum,  pred_scores, transitivity_weight=0.5):
-    #pred_output (N,q)
-    relnum = insnum*(insnum-1)
-    pred_scores_matrix = np.zeros((insnum,insnum,26))
-    idx=0
-    for i in range(insnum):
-        for j in range(insnum):
-            if i!=j:
-                pred_scores_matrix[i][j]=pred_scores[idx]
-                idx+=1
-
-    # Iterate through all triplets (a, b, c)
-    for a in range(insnum):
-        for b in range(insnum):
-            if a == b: continue
-            for c in range(insnum):
-                if a == c or b == c: continue
-                # Get the predicted categories for ab and bc
-                ab_scores = pred_scores_matrix[a, b]
-                bc_scores = pred_scores_matrix[b, c]
-                # Find the highest predicted category for ab and bc
-                ab_category = np.argmax(ab_scores) # Ignore none class (index 26)
-                ab_category_score = ab_scores.max()
-                bc_category = np.argmax(bc_scores) # Ignore none class (index 26)
-                bc_category_score = bc_scores.max()
-
-                # If ab and bc have the same predicted category, boost ac's confidence in that category
-                if ab_category == bc_category:
-                # Boost ac edge's score in the same category
-                    pred_scores_matrix[a, c, ab_category] = max(ab_category_score,bc_category_score)
-            # Reshape the matrix back to (N_e, 27)
-    optimized_pred_scores = np.zeros_like(pred_scores)
-    idx = 0
-    for i in range(insnum):
-        for j in range(insnum):
-            if i != j:
-                optimized_pred_scores[idx] = pred_scores_matrix[i, j]
-                idx += 1
-    return optimized_pred_scores

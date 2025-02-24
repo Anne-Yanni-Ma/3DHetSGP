@@ -13,12 +13,11 @@ import torch
 from data.dataloader_EW import DataLoader_3DSSG
 from Heter_ssg_eval_tool import Object_Accuracy, Object_Recall, Heter_Predicate_Accuracy, Heter_Predicate_Recall, Heter_Relation_Recall
 from models.obj_classification import obj_classification
-from models.op_utils import  gen_edge_feature
 lpred_w =  torch.Tensor([0.25, 1]).cuda()
 spred_w =  torch.Tensor([0.25, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]).cuda()
 ppred_w =  torch.Tensor([0.25, 1, 1, 1, 1, 1, 1]).cuda()
 cpred_w =  torch.Tensor([0.25, 1, 1, 1, 1, 1, 1]).cuda()
-pred_w_type  =  torch.Tensor([0.25, 1, 1]).cuda()
+pred_w_type  =  torch.Tensor([0.25, 1, 1,1]).cuda()
 
 # Project directory
 PROJECT_DIR = os.path.dirname(__file__)
@@ -30,8 +29,8 @@ EVALWEIGHT = False
 # Arguments declearation
 def parse_args():
     parser = argparse.ArgumentParser('Model')
-    parser.add_argument('--model', type=str, default='HeterGNN_newEdge_model_xy', help='model name [default: GNN_knowledge_fusion,HeterGNN_model]')
-    parser.add_argument('--task', type=str, default='PredCls', help='Task type [default: PredCls,SGCls ]')
+    parser.add_argument('--model', type=str, default='HeterGNN_newEdge_model_sg_xy', help='model name [default: GNN_knowledge_fusion,HeterGNN_model]')
+    parser.add_argument('--task', type=str, default='SGCls', help='Task type [default: PredCls,SGCls ]')
     parser.add_argument('--multiloss', type=str, default='HeterGNN_loss', help='model name [default: GNN_knowledge_fusion,HeterGNN_model]')
     parser.add_argument('--epoch',  default=100, type=int, help='Epoch to run [default: 100]')
     parser.add_argument('--gpu', type=str, default='0', help='GPU to use [default: GPU 0]')
@@ -72,8 +71,6 @@ def gen_type_weight(type_output4):
 
 
 
-
-
 def prepare_onehot_objgt(gt_obj):
     insnum = gt_obj.shape[0]
     onehot = torch.zeros(insnum, 160).float().cuda()
@@ -81,18 +78,6 @@ def prepare_onehot_objgt(gt_obj):
         onehot[i, gt_obj[i]] = 1
     return onehot
 
-def calculate_tensor_Acc(w_Gated, gt_w,size):
-    zero_tag =0
-    num_gt = torch.sum(gt_w == 1)
-    if(num_gt==0):
-        zero_tag= 1
-        weight_acc =0
-    else:
-        count_correct = torch.sum((w_Gated == gt_w) & (gt_w == 1))
-        weight_acc = int(count_correct) / int(num_gt)
-    count_sim = torch.sum((w_Gated == gt_w))
-    weight_M_simarity =  int(count_sim) /  size
-    return weight_acc,zero_tag,weight_M_simarity
 
 
 def main(args):
@@ -106,7 +91,7 @@ def main(args):
     timestr = str(datetime.datetime.now().strftime('%Y-%m-%d_%H-%M'))
     experiment_dir = Path('./log/')
     experiment_dir.mkdir(exist_ok=True)
-    experiment_dir = experiment_dir.joinpath('PredCls_HGU')
+    experiment_dir = experiment_dir.joinpath('HeterGNN_newEdge_SGCls')
     experiment_dir.mkdir(exist_ok=True)
     if args.log_dir is None:
         experiment_dir = experiment_dir.joinpath(timestr)
@@ -141,26 +126,26 @@ def main(args):
     MODEL = importlib.import_module(args.model)
     MODEL_LOSS = importlib.import_module(args.multiloss)
     shutil.copy(os.path.join(PROJECT_DIR, 'models/%s.py' % args.model), str(experiment_dir))
-    shutil.copy(os.path.join(PROJECT_DIR, 'train_heterG_predcls_newEdge.py'), str(experiment_dir))
+    shutil.copy(os.path.join(PROJECT_DIR, 'train_heterG_sgcls_newEdge.py'), str(experiment_dir))
     shutil.copy(os.path.join(PROJECT_DIR, 'Heter_ssg_eval_tool.py'), str(experiment_dir))
     shutil.copy(os.path.join(PROJECT_DIR, 'models/pointnet.py'), str(experiment_dir))
-    shutil.copy(os.path.join(PROJECT_DIR, 'models/HeterGNN_newEdge_model_xy.py'), str(experiment_dir))
+    shutil.copy(os.path.join(PROJECT_DIR, 'models/HeterGNN_newEdge_model_sg_xy.py'), str(experiment_dir))
     shutil.copy(os.path.join(PROJECT_DIR, 'models/graph.py'), str(experiment_dir))
     shutil.copy(os.path.join(PROJECT_DIR, 'models/utils.py'), str(experiment_dir))
 
-    # initial pretrained node/edge embedder
-    address_node = os.path.join(PROJECT_DIR, 'log/obj_classification/2023-03-05_20-52')
+    # initial pretrained node/edge embedder  #2024-01-06_19-45
+    address_node = os.path.join(PROJECT_DIR, 'log/obj_classification/2023-03-05_20-52')#2023-03-05_20-52') #2023-09-14_17-43
     sys.path.append(address_node)
     MODEL_node = importlib.import_module('models.obj_classification.obj_classification')
     node_embedder = MODEL_node.get_model().cuda()
-    dict_address_node = os.path.join(address_node, 'checkpoints/last_model.pth')
+    dict_address_node = os.path.join(address_node, 'checkpoints/last_model.pth') #best_R1_model
     checkpoint_node = torch.load(dict_address_node)
     node_embedder.load_state_dict(checkpoint_node['model_state_dict'])
     node_embedder = node_embedder.cuda().eval()
 
-
     #  26 pred_classify
     address_edge = os.path.join(PROJECT_DIR, 'log/pred_classification/2023-02-15_17-46') #2023-02-15_17-46
+
     sys.path.append(address_edge)
     MODEL_edge = importlib.import_module('models.pred_classification.pred_classification')
     pred_embedder = MODEL_edge.get_model().cuda()
@@ -168,17 +153,20 @@ def main(args):
     checkpoint_edge = torch.load(dict_address_edge)
     pred_embedder.load_state_dict(checkpoint_edge['model_state_dict'])
     pred_embedder = pred_embedder.cuda().eval()
+    MODEL_type = importlib.import_module('models.edge_classification.type_classification_MP')
+
 
     obj_w = TRAINING_SET.obj_w
     pred_w = TRAINING_SET.pred_w
     network = MODEL.get_model().cuda()    # cuda  MODEL: GNN_knowledge_fusion
     #criterion = MODEL.get_loss(alpha=0.1, beta=1, gamma=2, obj_w=obj_w).cuda()   # cuda
-    #criterion_l = MODEL_LOSS.get_loss_l(alpha=0.1, beta=1, gamma=2).cuda()  # cuda  , pred_w=spred_w
     criterion_l = MODEL_LOSS.get_loss_l(alpha=0.1, beta=1, gamma=2, pred_w=lpred_w).cuda()  # cuda  , pred_w=spred_w
     criterion_s = MODEL_LOSS.get_loss_s(alpha=0.1, beta=1, gamma=2, pred_w=spred_w).cuda()   # cuda
     criterion_p = MODEL_LOSS.get_loss_p(alpha=0.1, beta=1, gamma=2, pred_w=ppred_w).cuda()  # cuda
     criterion_c = MODEL_LOSS.get_loss_c(alpha=0.1, beta=1, gamma=2, pred_w=cpred_w).cuda()  # cuda
     criterion_obj = MODEL_LOSS.get_loss_obj(alpha=0.1, beta=1, gamma=2, obj_w=obj_w).cuda()  # cuda
+    criterion_edge = MODEL_type.TypeLoss(gamma=2,pred_w=pred_w_type).cuda()
+
     def weights_init(m):
         classname = m.__class__.__name__
         if classname.find('Conv2d') != -1:
@@ -254,7 +242,6 @@ def main(args):
         # ---------------- Start batch set training --------------------
         bar = tqdm(enumerate(trainDataLoader), total=len(trainDataLoader), smoothing=0.9)
         for i, data in bar:
-            if i>5: break
             pc_mat, pc_geom_info, types_output4, gt_obj, gt_rel = data
             types_output4 = types_output4[0].cuda()
             bboxes, lwhV, centroid = pc_geom_info
@@ -265,10 +252,9 @@ def main(args):
             pc_mat = pc_mat[0]  # (Nn,1024,3)
             gt_obj = gt_obj[0]  # (Nn, )
             gt_rel = gt_rel[0]  # (Ne, 3)
-            #edge_descriptor = gen_edge_feature(pc_mat).cuda() # (Ne, 11)
-            edge_descriptor=[]
+
             pc_mat_node = pc_mat.cuda()  # (Nn,1024,3)
-            pc_mat_edge = torch.clone(pc_mat_node).cuda()  # 深拷贝
+            pc_mat_edge = torch.clone(pc_mat_node).cuda()
             gt_obj = gt_obj.cuda().long()  # (Nn, )
             gt_rel = gt_rel.cuda().long()  # (Ne, 3)
             pc_geom_info = bboxes_minc.cuda(), lwhV.cuda(), centroid.cuda()
@@ -288,26 +274,23 @@ def main(args):
             optimizer.zero_grad()
             network = network.train()
 
-
             types_w = types_output4
             multiW_Gated = gen_type_weight(types_w)
             link_wG, support_wG, p_wG, comp_wG = multiW_Gated
-            Edge_weights = link_wG, support_wG, p_wG, comp_wG
-
-
+            Edge_weights = link_wG, support_wG, p_wG, comp_wG  # comp_wG
 
             node_output,multi_logits, multi_edge_output = network(obj_codes,  pred_codes, Edge_weights, pc_geom_info) #IN: obj_codes (Nn,C_konw) pred_codes (Ne, 512)
-            edge_output_s, edge_output_prox, edge_output_c = multi_edge_output
-            #loss_l = criterion_l(edge_output_l, gt_obj, gt_rel)
-            loss_e =  0#criterion_edge(type_output, gt_obj, gt_rel)
+            edge_output_l, edge_output_s, edge_output_prox, edge_output_c, type_output = multi_edge_output
+            loss_l = criterion_l(edge_output_l, gt_obj, gt_rel)
+            loss_e =  criterion_edge(type_output, gt_obj, gt_rel)
             loss_s = criterion_s(edge_output_s, gt_obj, gt_rel)
             loss_p = criterion_p(edge_output_prox, gt_obj, gt_rel)
             loss_c = criterion_c(edge_output_c, gt_obj, gt_rel)
             loss_obj = criterion_obj(node_output, gt_obj, gt_rel)
             if NOWEIGHTLOSS == True:
-                pred_loss = loss_p + loss_c + loss_s
+                pred_loss = loss_l +loss_p + loss_c + loss_s
             else:
-                pred_loss = loss_e + loss_p + loss_c + loss_s
+                pred_loss = loss_e + loss_l + loss_p + loss_c + loss_s
 
             loss = loss_obj + 2 * pred_loss  ## alpha:1 beta: 0.1
             loss.backward()
@@ -315,20 +298,17 @@ def main(args):
 
             loss_sum = loss_sum + loss.item()
 
+            logit_s, logit_p, logit_c = multi_logits
 
             node_output_eval = node_output.clone().detach()
-            #edge_output_l_eval = edge_output_l.clone().detach()
             edge_output_s_eval = edge_output_s.clone().detach()
             edge_output_prox_eval = edge_output_prox.clone().detach()
             edge_output_comp_eval = edge_output_c.clone().detach()
 
             heter_edge_output_eval = edge_output_s_eval, edge_output_prox_eval, edge_output_comp_eval
-            #train_obj_acc.calculate_accuray(node_output_eval, gt_obj) # node_output_eval (Nn,160) gt_obj (Nn,)
-            #train_obj_recall.calculate_recall(node_output_eval, gt_obj)
             train_pred_acc.calculate_Heter_accuracy(pc_mat.shape[0],heter_edge_output_eval, gt_rel)
-            #train_pred_recall.calculate_Heter_recall_w(pc_mat.shape[0], heter_edge_output_eval, gt_rel,types_w)
-            #train_pred_recall.calculate_Single_recall(pc_mat.shape[0], heter_edge_output_eval, gt_rel)
-            train_rel_recall.calculate_Heter_recall(node_output_eval,  heter_edge_output_eval, gt_obj, gt_rel)  #(Nn,160) (Ne, 27)  gt_obj (Nn,)  gt_rel (Ne, 3)
+
+            train_rel_recall.calculate_Heter_recall(node_output_eval,  heter_edge_output_eval, gt_obj, gt_rel)
             train_rel_recall.calculate_Heter_ngc_recall(node_output_eval, heter_edge_output_eval, gt_obj, gt_rel)
 
         #train_obj_acc.final_update()
@@ -357,8 +337,6 @@ def main(args):
             log_string('---- EPOCH %03d TEST ----' % (global_epoch + 1))
             test_bar = tqdm(enumerate(testDataLoader), total=len(testDataLoader), smoothing=0.9)
             for i, data in test_bar:
-                if i > 5: break
-
                 pc_mat, pc_geom_info, types_output4, gt_obj, gt_rel = data
                 types_output4 = types_output4[0].cuda()
                 bboxes, lwhV, centroid = pc_geom_info
@@ -368,8 +346,7 @@ def main(args):
                 pc_mat = pc_mat[0]  # (Nn,1024,3)
                 gt_obj = gt_obj[0]  # (Nn, )
                 gt_rel = gt_rel[0]  # (Ne, 3)
-                # edge_descriptor = gen_edge_feature(pc_mat).cuda() # (Ne, 11)
-                edge_descriptor = []
+
                 pc_mat_node = pc_mat.cuda()   # (Nn,1024,3)
                 pc_mat_edge = torch.clone(pc_mat_node).cuda()
                 gt_obj = gt_obj.cuda().long() # (Nn, )
@@ -390,27 +367,24 @@ def main(args):
 
                 pred_output, pred_codes = pred_embedder(pc_mat_edge)  # Ne,27   Ne,512
 
-
                 types_w = types_output4
                 multiW_Gated = gen_type_weight(types_w)
                 link_wG, support_wG, p_wG, comp_wG = multiW_Gated
+                Edge_weights = link_wG, support_wG, p_wG, comp_wG#comp_wG
 
-                Edge_weights = link_wG, support_wG, p_wG, comp_wG
-
-
-                network = network.eval() # MODEL: HeterGNN_OneEmb_model
+                network = network.eval()
                 node_output, multi_logits, multi_edge_output = network(obj_codes, pred_codes, Edge_weights, pc_geom_info)  # IN: obj_codes (Nn,C_konw) pred_codes (Ne, 512)
-                edge_output_s, edge_output_prox, edge_output_c = multi_edge_output
-                #loss_l = criterion_l(edge_output_l, gt_obj, gt_rel)
-                loss_e = 0# criterion_edge(type_output, gt_obj, gt_rel)
+                edge_output_l, edge_output_s, edge_output_prox, edge_output_c,type_output = multi_edge_output
+                loss_l = criterion_l(edge_output_l, gt_obj, gt_rel)
+                loss_e =  criterion_edge(type_output, gt_obj, gt_rel)
                 loss_s = criterion_s(edge_output_s, gt_obj, gt_rel)
                 loss_p = criterion_p(edge_output_prox, gt_obj, gt_rel)
                 loss_c = criterion_c(edge_output_c, gt_obj, gt_rel)
                 loss_obj = criterion_obj(node_output, gt_obj, gt_rel)
                 if NOWEIGHTLOSS == True:
-                    pred_loss = loss_p + loss_c + loss_s
+                    pred_loss = loss_l+ loss_p + loss_c + loss_s
                 else:
-                    pred_loss = loss_e + loss_p + loss_c + loss_s
+                    pred_loss = loss_e + loss_l +loss_p + loss_c + loss_s
                 loss =   loss_obj + 2 * pred_loss  ## alpha:1 beta: 0.1
 
                 loss_sum = loss_sum + loss.item()
@@ -420,15 +394,12 @@ def main(args):
                 edge_output_prox_eval = edge_output_prox.clone().detach()
                 edge_output_comp_eval = edge_output_c.clone().detach()
 
-                logit_s, logit_p, logit_c = multi_logits
                 heter_edge_output_eval = edge_output_s_eval, edge_output_prox_eval, edge_output_comp_eval
-                #heter_edge_output_eval = logit_s.clone().detach(), logit_p.clone().detach(), logit_c.clone().detach()
 
                 test_obj_acc.calculate_accuray(node_output_eval, gt_obj)# node_output_eval (Nn,160) gt_obj (Nn,)
                 test_obj_recall.calculate_recall(node_output_eval, gt_obj)
                 test_pred_acc.calculate_Heter_accuracy(pc_mat.shape[0], heter_edge_output_eval, gt_rel)
                 test_pred_recall.calculate_Heter_recall(pc_mat.shape[0], heter_edge_output_eval, gt_rel)
-
                 test_pred_recall.calculate_Single_recall(pc_mat.shape[0], heter_edge_output_eval, gt_rel)
                 test_rel_recall.calculate_Heter_recall(node_output_eval, heter_edge_output_eval, gt_obj, gt_rel)  # (Nn,160) (Ne, 27)  gt_obj (Nn,)  gt_rel (Ne, 3)
                 test_rel_recall.calculate_Heter_ngc_recall(node_output_eval, heter_edge_output_eval, gt_obj, gt_rel)
@@ -464,6 +435,9 @@ def main(args):
                 best_rel_R20 = curr_rel_R20
                 best_rel_R50 = curr_rel_R50
                 best_rel_R100 = curr_rel_R100
+                best_rel_R20_ngc = curr_rel_R20_ngc
+                best_rel_R50_ngc = curr_rel_R50_ngc
+                best_rel_R100_ngc = curr_rel_R100_ngc
                 log_string('--Eval-- Best rel: R@20: %f; ' % (best_rel_R20) + 'rel R@50: %f; ' % (
                     best_rel_R50) + 'rel R@100: %f; ' % (best_rel_R100))
 
@@ -480,12 +454,6 @@ def main(args):
                 log_string('Saving model....')
 
             if curr_rel_mR50 > best_rel_mR50 or curr_rel_mR100 > best_rel_mR100:
-                best_rel_R20 = curr_rel_R20
-                best_rel_R50 = curr_rel_R50
-                best_rel_R100 = curr_rel_R100
-                best_rel_R20_ngc = curr_rel_R20_ngc
-                best_rel_R50_ngc = curr_rel_R50_ngc
-                best_rel_R100_ngc = curr_rel_R100_ngc
                 best_rel_mR20 = curr_rel_mR20
                 best_rel_mR50 = curr_rel_mR50
                 best_rel_mR100 = curr_rel_mR100
