@@ -35,8 +35,10 @@ Pretrained meta-embedding: data/meta_embedding.
 ```bash
 python train_GAE_meta_embedding.py
 ```
-[Obj_classification pth](https://drive.google.com/file/d/1qiE6oujdynejInkun7hSPNveWALg6UzE/view?usp=sharing)
-[Pred_classification pth](https://drive.google.com/file/d/1ru_8JacDNy_cPWBNuF5fOyMR0GXPWWpD/view?usp=sharing)
+[Obj_classification pth](https://drive.google.com/file/d/1qiE6oujdynejInkun7hSPNveWALg6UzE/view?usp=sharing).
+
+[Pred_classification pth](https://drive.google.com/file/d/1ru_8JacDNy_cPWBNuF5fOyMR0GXPWWpD/view?usp=sharing).
+
 # Run Code
 ## PredCls:
 ```bash
