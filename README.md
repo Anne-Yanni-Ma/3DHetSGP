@@ -86,4 +86,5 @@ This project is partly built upon **_Knowledge-inspired 3D Scene Graph Predictio
 
 ## Contact
 
-If you have any questions, feel free to open an issue or contact us at mayn3@mail2.sysu.edu.cn, y.ma2@uva.nl. 
+If you have any questions, feel free to open an issue or contact us at mayn3@mail2.sysu.edu.cn. 
+
